@@ -1,7 +1,7 @@
  
 ---
 
-# Kali Linux Türkçe Dil ve Klavye Ayarlama bash Betiği
+# Kali Linux Türkçe Dil ve Klavye Ayarlama Bash Betiği
 
 Bu betik, Kali Linux'ta sistemi tamamen Türkçe diline geçirir ve klavyeyi başlangıçta Türkçe Q olarak ayarlar.
 
