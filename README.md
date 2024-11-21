@@ -77,6 +77,7 @@ if [[ "$REBOOT_CHOICE" == "e" || "$REBOOT_CHOICE" == "E" ]]; then
 else
     echo "Ayarlar uygulandı ancak yeniden başlatmadan tam olarak aktif olmayabilir."
 fi
+
 ```
 
 --- 
