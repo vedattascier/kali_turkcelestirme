@@ -1,5 +1,4 @@
 # kali_turkcelestirme
-kali tüekçeleştirme bash kodu 
 
 ---
 
