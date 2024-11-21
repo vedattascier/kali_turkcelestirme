@@ -1,8 +1,7 @@
-# kali_turkcelestirme
-
+ 
 ---
 
-# Türkçe Dil ve Klavye Ayarlama Betiği
+# Kali Linux Türkçe Dil ve Klavye Ayarlama bash Betiği
 
 Bu betik, Kali Linux'ta sistemi tamamen Türkçe diline geçirir ve klavyeyi başlangıçta Türkçe Q olarak ayarlar.
 
@@ -15,7 +14,7 @@ Bu betik, Kali Linux'ta sistemi tamamen Türkçe diline geçirir ve klavyeyi ba�
 ## Kullanım:
 
 1. **Betiği bir dosyaya kaydedin**  
-   Betik içeriğini bir dosyaya kaydedin, örneğin `turkce-klavye.sh`.
+   Betik içeriğini bir dosyaya kaydedin, örneğin `kali_turkcelestirme.sh`.
 
 2. **Çalıştırma izni verin**  
    Terminalde aşağıdaki komutu kullanarak dosyaya çalıştırma izni verin:  
