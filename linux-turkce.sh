@@ -1,138 +1,310 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # ================================================================
-# LINUX TÜRKÇELEŞTİRME & SİSTEM YÖNETİM ARACI
-# Kali Linux / Debian
+# KALI LINUX TÜRKÇELEŞTİRME & SİSTEM YÖNETİM ARACI
+# Kali Linux / Debian / Ubuntu
 # Tek dosya sürümü
+# GitHub + curl | sudo bash uyumlu
 # ================================================================
 
 set -o pipefail
 
-VERSION="3.0"
+VERSION="4.0"
 
-# -------------------- RENKLER --------------------
+# ================================================================
+# RENKLER
+# ================================================================
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 WHITE='\033[1;37m'
 RESET='\033[0m'
 
-# -------------------- ROOT KONTROLÜ --------------------
+# ================================================================
+# ROOT KONTROLÜ
+# ================================================================
 
 if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}Bu program root yetkisi gerektiriyor.${RESET}"
     echo
-    echo "Çalıştırma:"
-    echo "sudo $0"
+    echo "Kullanım:"
+    echo "sudo bash $0"
     exit 1
 fi
 
-# -------------------- SİSTEM --------------------
+# ================================================================
+# SİSTEM KONTROLÜ
+# ================================================================
 
-if [[ ! -f /etc/os-release ]]; then
+if [[ ! -r /etc/os-release ]]; then
     echo -e "${RED}İşletim sistemi tespit edilemedi.${RESET}"
     exit 1
 fi
 
+# shellcheck disable=SC1091
 source /etc/os-release
 
-if ! command -v apt >/dev/null 2>&1; then
-    echo -e "${RED}Bu betik Debian/Ubuntu/Kali tabanlı apt sistemleri içindir.${RESET}"
+if ! command -v apt-get >/dev/null 2>&1; then
+    echo -e "${RED}Bu araç APT tabanlı sistemler içindir.${RESET}"
     exit 1
 fi
 
-# -------------------- AKTİF KULLANICI --------------------
-
-TARGET_USER=""
-
-if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
-    TARGET_USER="$SUDO_USER"
+if ! command -v dpkg >/dev/null 2>&1; then
+    echo -e "${RED}dpkg bulunamadı.${RESET}"
+    exit 1
 fi
 
-if [[ -z "$TARGET_USER" ]]; then
-    TARGET_USER=$(logname 2>/dev/null || true)
-fi
-
-if [[ -z "$TARGET_USER" || "$TARGET_USER" == "root" ]]; then
-    TARGET_USER=$(awk -F: '$3 >= 1000 && $3 < 60000 {print $1; exit}' /etc/passwd)
-fi
-
-if [[ -n "$TARGET_USER" ]]; then
-    TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
-    TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || echo "")
-else
-    TARGET_HOME=""
-    TARGET_UID=""
-fi
-
-# -------------------- LOG --------------------
+# ================================================================
+# GLOBAL DEĞİŞKENLER
+# ================================================================
 
 LOG_FILE="/var/log/linux-turkce.log"
+BACKUP_DIR=""
+TARGET_USER=""
+TARGET_UID=""
+TARGET_HOME=""
+DESKTOP=""
 
-touch "$LOG_FILE"
-chmod 600 "$LOG_FILE"
+# ================================================================
+# LOG
+# ================================================================
+
+touch "$LOG_FILE" 2>/dev/null || true
+chmod 600 "$LOG_FILE" 2>/dev/null || true
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
-# -------------------- YARDIMCI --------------------
+# ================================================================
+# HATA YAKALAMA
+# ================================================================
+
+trap 'log "Hata oluştu. Satır: $LINENO Komut: $BASH_COMMAND"' ERR
+
+# ================================================================
+# AKTİF / HEDEF KULLANICI TESPİTİ
+# ================================================================
+
+detect_target_user() {
+
+    TARGET_USER=""
+    TARGET_UID=""
+    TARGET_HOME=""
+
+    # sudo ile çalıştırıldıysa gerçek kullanıcı
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+        if id "${SUDO_USER}" >/dev/null 2>&1; then
+            TARGET_USER="$SUDO_USER"
+        fi
+    fi
+
+    # logname
+    if [[ -z "$TARGET_USER" ]]; then
+        local LOGIN_USER=""
+        LOGIN_USER="$(logname 2>/dev/null || true)"
+
+        if [[ -n "$LOGIN_USER" &&
+              "$LOGIN_USER" != "root" ]] &&
+           id "$LOGIN_USER" >/dev/null 2>&1; then
+            TARGET_USER="$LOGIN_USER"
+        fi
+    fi
+
+    # /dev/console sahibi
+    if [[ -z "$TARGET_USER" && -e /dev/console ]]; then
+        local CONSOLE_USER=""
+        CONSOLE_USER="$(stat -c '%U' /dev/console 2>/dev/null || true)"
+
+        if [[ -n "$CONSOLE_USER" &&
+              "$CONSOLE_USER" != "root" ]] &&
+           id "$CONSOLE_USER" >/dev/null 2>&1; then
+            TARGET_USER="$CONSOLE_USER"
+        fi
+    fi
+
+    # İlk normal kullanıcı
+    if [[ -z "$TARGET_USER" ]]; then
+        TARGET_USER="$(
+            awk -F: '
+                $3 >= 1000 && $3 < 60000 &&
+                $1 != "nobody" {
+                    print $1
+                    exit
+                }
+            ' /etc/passwd
+        )"
+    fi
+
+    if [[ -n "$TARGET_USER" ]]; then
+        TARGET_UID="$(id -u "$TARGET_USER" 2>/dev/null || true)"
+        TARGET_HOME="$(getent passwd "$TARGET_USER" |
+            cut -d: -f6)"
+    fi
+}
+
+detect_target_user
+
+# ================================================================
+# MASAÜSTÜ TESPİTİ
+# ================================================================
+
+detect_desktop() {
+
+    DESKTOP="Bilinmiyor"
+
+    local DESKTOP_TEXT=""
+
+    if [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
+        DESKTOP_TEXT="${XDG_CURRENT_DESKTOP}"
+    elif [[ -n "${DESKTOP_SESSION:-}" ]]; then
+        DESKTOP_TEXT="${DESKTOP_SESSION}"
+    elif [[ -n "$TARGET_USER" ]]; then
+        DESKTOP_TEXT="$(
+            runuser -u "$TARGET_USER" -- \
+            env XDG_CURRENT_DESKTOP="" \
+            DESKTOP_SESSION="" \
+            bash -c '
+                printf "%s" "${XDG_CURRENT_DESKTOP:-}"
+                printf " %s" "${DESKTOP_SESSION:-}"
+            ' 2>/dev/null || true
+        )"
+    fi
+
+    if [[ "$DESKTOP_TEXT" =~ [Gg][Nn][Oo][Mm][Ee] ]]; then
+        DESKTOP="GNOME"
+    elif [[ "$DESKTOP_TEXT" =~ [Kk][Dd][Ee]|[Pp]lasma ]]; then
+        DESKTOP="KDE Plasma"
+    elif [[ "$DESKTOP_TEXT" =~ [Xx][Ff][Cc][Ee] ]]; then
+        DESKTOP="XFCE"
+    elif [[ "$DESKTOP_TEXT" =~ [Ll][Xx][Qq][Tt] ]]; then
+        DESKTOP="LXQt"
+    elif [[ "$DESKTOP_TEXT" =~ [Cc]innamon ]]; then
+        DESKTOP="Cinnamon"
+    else
+        DESKTOP="$DESKTOP_TEXT"
+    fi
+}
+
+detect_desktop
+
+# ================================================================
+# YARDIMCI
+# ================================================================
 
 pause() {
     echo
-    read -rp "Devam etmek için ENTER'a basın..."
+    read -r -p "Devam etmek için ENTER'a basın..."
 }
 
 ask_yes_no() {
+
     local QUESTION="$1"
-    local ANSWER
+    local ANSWER=""
 
-    read -rp "$QUESTION [e/H]: " ANSWER
+    while true; do
 
-    [[ "$ANSWER" =~ ^[eE]$ ]]
+        read -r -p "$QUESTION [E/h]: " ANSWER
+
+        case "$ANSWER" in
+            e|E|evet|EVET|y|Y|yes|YES)
+                return 0
+                ;;
+            h|H|hayır|HAYIR|n|N|no|NO|"")
+                return 1
+                ;;
+            *)
+                echo -e "${YELLOW}Lütfen E veya H girin.${RESET}"
+                ;;
+        esac
+    done
+}
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
 }
 
 package_exists() {
-    apt-cache show "$1" >/dev/null 2>&1
+
+    local PACKAGE="$1"
+
+    apt-cache show "$PACKAGE" >/dev/null 2>&1
 }
 
 package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null |
+
+    local PACKAGE="$1"
+
+    dpkg-query \
+        -W \
+        -f='${Status}' \
+        "$PACKAGE" 2>/dev/null |
         grep -q "install ok installed"
 }
 
 install_if_available() {
+
     local PACKAGE="$1"
 
-    if package_exists "$PACKAGE"; then
-
-        if package_installed "$PACKAGE"; then
-            echo -e "${GREEN}[✓] $PACKAGE zaten kurulu.${RESET}"
-        else
-            echo -e "${CYAN}[+] $PACKAGE kuruluyor...${RESET}"
-
-            if apt-get install -y "$PACKAGE"; then
-                echo -e "${GREEN}[✓] $PACKAGE kuruldu.${RESET}"
-                log "Kuruldu: $PACKAGE"
-            else
-                echo -e "${RED}[!] $PACKAGE kurulamadı.${RESET}"
-                log "Kurulum başarısız: $PACKAGE"
-            fi
-        fi
-
+    if package_installed "$PACKAGE"; then
+        echo -e "${GREEN}[✓] $PACKAGE zaten kurulu.${RESET}"
         return 0
     fi
 
-    echo -e "${YELLOW}[-] $PACKAGE bu sistemin depolarında bulunamadı.${RESET}"
+    if ! package_exists "$PACKAGE"; then
+        echo -e "${YELLOW}[-] $PACKAGE depoda bulunamadı.${RESET}"
+        return 1
+    fi
+
+    echo -e "${CYAN}[+] $PACKAGE kuruluyor...${RESET}"
+
+    if apt-get install -y "$PACKAGE"; then
+        echo -e "${GREEN}[✓] $PACKAGE kuruldu.${RESET}"
+        log "Paket kuruldu: $PACKAGE"
+        return 0
+    fi
+
+    echo -e "${RED}[!] $PACKAGE kurulamadı.${RESET}"
+    log "Paket kurulamadı: $PACKAGE"
     return 1
 }
 
-# -------------------- YEDEK --------------------
+# ================================================================
+# APT KİLİT KONTROLÜ
+# ================================================================
+
+check_apt_lock() {
+
+    if command_exists fuser; then
+
+        if fuser \
+            /var/lib/dpkg/lock-frontend \
+            /var/lib/apt/lists/lock \
+            /var/cache/apt/archives/lock \
+            >/dev/null 2>&1; then
+
+            echo -e "${YELLOW}APT başka bir işlem tarafından kullanılıyor.${RESET}"
+            echo "Lütfen diğer paket yöneticisini kapatın."
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# ================================================================
+# YEDEKLEME
+# ================================================================
 
 create_backup() {
+
+    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+        return 0
+    fi
 
     BACKUP_DIR="/root/linux-turkce-backup-$(date '+%Y%m%d-%H%M%S')"
 
@@ -140,29 +312,59 @@ create_backup() {
 
     echo -e "${CYAN}Sistem ayarları yedekleniyor...${RESET}"
 
-    [[ -f /etc/locale.gen ]] &&
-        cp /etc/locale.gen "$BACKUP_DIR/"
+    local FILE
 
-    [[ -f /etc/default/locale ]] &&
-        cp /etc/default/locale "$BACKUP_DIR/"
+    for FILE in \
+        /etc/locale.gen \
+        /etc/default/locale \
+        /etc/default/keyboard \
+        /etc/hostname \
+        /etc/hosts
+    do
 
-    [[ -f /etc/default/keyboard ]] &&
-        cp /etc/default/keyboard "$BACKUP_DIR/"
+        if [[ -f "$FILE" ]]; then
+            cp -a "$FILE" "$BACKUP_DIR/" 2>/dev/null || true
+        fi
 
-    [[ -f /etc/hostname ]] &&
-        cp /etc/hostname "$BACKUP_DIR/"
+    done
 
-    [[ -f /etc/hosts ]] &&
-        cp /etc/hosts "$BACKUP_DIR/"
+    if [[ -f /etc/profile.d/turkish-locale.sh ]]; then
+        cp -a \
+            /etc/profile.d/turkish-locale.sh \
+            "$BACKUP_DIR/" 2>/dev/null || true
+    fi
 
-    echo -e "${GREEN}Yedek oluşturuldu:${RESET}"
+    echo -e "${GREEN}✓ Yedek oluşturuldu:${RESET}"
     echo "$BACKUP_DIR"
 
     log "Yedek oluşturuldu: $BACKUP_DIR"
 }
 
 # ================================================================
-# TÜRKÇE LOCALE
+# APT UPDATE
+# ================================================================
+
+update_package_list_silent() {
+
+    echo -e "${CYAN}[+] Paket listesi kontrol ediliyor...${RESET}"
+
+    if ! check_apt_lock; then
+        return 1
+    fi
+
+    if apt-get update; then
+        echo -e "${GREEN}[✓] Paket listesi güncellendi.${RESET}"
+        log "apt update başarılı."
+        return 0
+    fi
+
+    echo -e "${RED}[!] apt update başarısız.${RESET}"
+    log "apt update başarısız."
+    return 1
+}
+
+# ================================================================
+# LOCALE
 # ================================================================
 
 configure_locale() {
@@ -173,58 +375,54 @@ configure_locale() {
 
     create_backup
 
-    install_if_available locales
+    install_if_available locales || true
 
     if [[ ! -f /etc/locale.gen ]]; then
         echo -e "${RED}/etc/locale.gen bulunamadı.${RESET}"
-        return
+        return 1
     fi
 
-    if grep -qE '^# *tr_TR\.UTF-8 UTF-8' /etc/locale.gen; then
-        sed -i -E 's/^# *tr_TR\.UTF-8 UTF-8/tr_TR.UTF-8 UTF-8/' \
+    if grep -qE '^[[:space:]]*#?[[:space:]]*tr_TR\.UTF-8[[:space:]]+UTF-8' \
+        /etc/locale.gen; then
+
+        sed -i -E \
+            's/^[[:space:]]*#[[:space:]]*(tr_TR\.UTF-8[[:space:]]+UTF-8)/\1/' \
             /etc/locale.gen
-    elif ! grep -qE '^tr_TR\.UTF-8 UTF-8' /etc/locale.gen; then
+
+    elif ! grep -qE '^[[:space:]]*tr_TR\.UTF-8[[:space:]]+UTF-8' \
+        /etc/locale.gen; then
+
         echo "tr_TR.UTF-8 UTF-8" >> /etc/locale.gen
     fi
 
-    echo
-    echo "Türkçe locale oluşturuluyor..."
+    if command_exists locale-gen; then
 
-    locale-gen tr_TR.UTF-8
+        if locale-gen tr_TR.UTF-8; then
+            echo -e "${GREEN}✓ Türkçe locale oluşturuldu.${RESET}"
+        else
+            echo -e "${RED}Locale oluşturulamadı.${RESET}"
+            return 1
+        fi
 
-    cat > /etc/default/locale <<EOF
+    else
+        echo -e "${RED}locale-gen bulunamadı.${RESET}"
+        return 1
+    fi
+
+    # LANGUAGE öncelikli olarak Türkçe.
+    # LC_ALL özellikle ayarlanmıyor.
+    cat > /etc/default/locale <<'EOF'
 LANG=tr_TR.UTF-8
-LANGUAGE=tr_TR:tr
-LC_CTYPE=tr_TR.UTF-8
-LC_NUMERIC=tr_TR.UTF-8
-LC_TIME=tr_TR.UTF-8
-LC_COLLATE=tr_TR.UTF-8
-LC_MONETARY=tr_TR.UTF-8
-LC_MESSAGES=tr_TR.UTF-8
-LC_PAPER=tr_TR.UTF-8
-LC_NAME=tr_TR.UTF-8
-LC_ADDRESS=tr_TR.UTF-8
-LC_TELEPHONE=tr_TR.UTF-8
-LC_MEASUREMENT=tr_TR.UTF-8
-LC_IDENTIFICATION=tr_TR.UTF-8
+LANGUAGE=tr_TR:tr:en
 EOF
 
     cat > /etc/profile.d/turkish-locale.sh <<'EOF'
 export LANG=tr_TR.UTF-8
-export LANGUAGE=tr_TR:tr
-export LC_CTYPE=tr_TR.UTF-8
-export LC_NUMERIC=tr_TR.UTF-8
-export LC_TIME=tr_TR.UTF-8
-export LC_COLLATE=tr_TR.UTF-8
-export LC_MONETARY=tr_TR.UTF-8
-export LC_MESSAGES=tr_TR.UTF-8
-export LC_PAPER=tr_TR.UTF-8
-export LC_MEASUREMENT=tr_TR.UTF-8
+export LANGUAGE=tr_TR:tr:en
 EOF
 
     chmod 644 /etc/profile.d/turkish-locale.sh
 
-    echo
     echo -e "${GREEN}✓ Sistem dili Türkçe olarak ayarlandı.${RESET}"
 
     log "Türkçe locale yapılandırıldı."
@@ -242,10 +440,10 @@ configure_keyboard() {
 
     create_backup
 
-    install_if_available keyboard-configuration
-    install_if_available console-setup
+    install_if_available keyboard-configuration || true
+    install_if_available console-setup || true
 
-    cat > /etc/default/keyboard <<EOF
+    cat > /etc/default/keyboard <<'EOF'
 XKBMODEL="pc105"
 XKBLAYOUT="tr"
 XKBVARIANT=""
@@ -253,14 +451,28 @@ XKBOPTIONS=""
 BACKSPACE="guess"
 EOF
 
-    if command -v localectl >/dev/null 2>&1; then
-        localectl set-keymap tr-q 2>/dev/null || true
-        localectl set-x11-keymap tr pc105 "" 2>/dev/null || true
+    if command_exists dpkg-reconfigure; then
+        DEBIAN_FRONTEND=noninteractive \
+            dpkg-reconfigure keyboard-configuration \
+            >/dev/null 2>&1 || true
     fi
 
-    echo -e "${GREEN}✓ Türkçe Q klavye ayarlandı.${RESET}"
+    if command_exists localectl; then
 
-    log "Türkçe Q klavye ayarlandı."
+        localectl set-x11-keymap \
+            tr \
+            pc105 \
+            "" \
+            "" \
+            >/dev/null 2>&1 || true
+
+        localectl set-keymap tr \
+            >/dev/null 2>&1 || true
+    fi
+
+    echo -e "${GREEN}✓ Türkçe Q klavye yapılandırıldı.${RESET}"
+
+    log "Türkçe Q klavye yapılandırıldı."
 }
 
 # ================================================================
@@ -273,30 +485,51 @@ configure_gnome() {
     echo -e "${BLUE}=== GNOME ===${RESET}"
     echo
 
-    if ! command -v gsettings >/dev/null 2>&1; then
-        echo -e "${YELLOW}GNOME/gsettings bulunamadı.${RESET}"
-        return
+    if [[ "$DESKTOP" != "GNOME" &&
+          "$DESKTOP" != *"GNOME"* ]]; then
+
+        echo "Aktif GNOME masaüstü tespit edilmedi."
+        return 0
     fi
 
-    if [[ -z "$TARGET_USER" || -z "$TARGET_UID" ]]; then
-        echo -e "${YELLOW}Grafik kullanıcı tespit edilemedi.${RESET}"
-        return
+    if [[ -z "$TARGET_USER" ]]; then
+        echo -e "${YELLOW}Grafik kullanıcı bulunamadı.${RESET}"
+        return 1
     fi
 
-    if [[ ! -S "/run/user/$TARGET_UID/bus" ]]; then
-        echo -e "${YELLOW}Aktif GNOME oturumu bulunamadı.${RESET}"
-        echo "Kullanıcı oturum açtıktan sonra bu ayar uygulanabilir."
-        return
+    if ! command_exists gsettings; then
+        echo -e "${YELLOW}gsettings bulunamadı.${RESET}"
+        return 1
+    fi
+
+    local USER_UID
+    USER_UID="$(id -u "$TARGET_USER" 2>/dev/null || true)"
+
+    if [[ -z "$USER_UID" ]]; then
+        return 1
+    fi
+
+    if [[ ! -S "/run/user/$USER_UID/bus" ]]; then
+        echo -e "${YELLOW}Aktif GNOME D-Bus oturumu bulunamadı.${RESET}"
+        echo "Kullanıcı grafik oturumu açtıktan sonra ayar uygulanabilir."
+        return 0
     fi
 
     runuser -u "$TARGET_USER" -- \
-        env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TARGET_UID/bus" \
-        gsettings set org.gnome.system.locale region "tr_TR.UTF-8" \
-        2>/dev/null || true
+        env \
+        HOME="$TARGET_HOME" \
+        USER="$TARGET_USER" \
+        LOGNAME="$TARGET_USER" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_UID/bus" \
+        gsettings set \
+        org.gnome.desktop.input-sources \
+        sources \
+        "[('xkb', 'tr')]" \
+        >/dev/null 2>&1 || true
 
-    echo -e "${GREEN}✓ GNOME locale ayarı uygulandı.${RESET}"
+    echo -e "${GREEN}✓ GNOME Türkçe klavye ayarı uygulandı.${RESET}"
 
-    log "GNOME locale ayarı uygulandı."
+    log "GNOME yapılandırıldı."
 }
 
 # ================================================================
@@ -309,19 +542,25 @@ configure_kde() {
     echo -e "${BLUE}=== KDE PLASMA ===${RESET}"
     echo
 
-    if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ||
-          "${XDG_CURRENT_DESKTOP:-}" == *"Plasma"* ]]; then
+    if [[ "$DESKTOP" != *"KDE"* &&
+          "$DESKTOP" != *"Plasma"* ]]; then
 
-        echo "KDE Plasma tespit edildi."
-
-        install_if_available kde-l10n-tr
-
-        echo
-        echo -e "${GREEN}KDE için mevcut Türkçe paketler kontrol edildi.${RESET}"
-
-    else
-        echo "Aktif KDE Plasma oturumu tespit edilmedi."
+        echo "Aktif KDE Plasma masaüstü tespit edilmedi."
+        return 0
     fi
+
+    echo "KDE Plasma tespit edildi."
+
+    # Modern Debian/Kali sistemlerinde eski kde-l10n-tr
+    # paketi bulunmayabilir. Varsa kurulur.
+    install_if_available kde-l10n-tr || true
+
+    # KDE language pack alternatifleri
+    install_if_available language-pack-kde-tr || true
+
+    echo -e "${GREEN}✓ KDE Türkçe paketleri kontrol edildi.${RESET}"
+
+    log "KDE Türkçe paketleri kontrol edildi."
 }
 
 # ================================================================
@@ -334,18 +573,18 @@ configure_fonts() {
     echo -e "${BLUE}=== TÜRKÇE FONTLAR ===${RESET}"
     echo
 
-    install_if_available fonts-noto-core
-    install_if_available fonts-noto-extra
-    install_if_available fonts-dejavu
-    install_if_available fontconfig
+    install_if_available fonts-noto-core || true
+    install_if_available fonts-noto-extra || true
+    install_if_available fonts-dejavu || true
+    install_if_available fontconfig || true
 
-    if command -v fc-cache >/dev/null 2>&1; then
-        fc-cache -f
+    if command_exists fc-cache; then
+        fc-cache -f >/dev/null 2>&1 || true
     fi
 
-    echo -e "${GREEN}✓ Font önbelleği yenilendi.${RESET}"
+    echo -e "${GREEN}✓ Font yapılandırması tamamlandı.${RESET}"
 
-    log "Türkçe fontlar yapılandırıldı."
+    log "Font yapılandırması tamamlandı."
 }
 
 # ================================================================
@@ -358,36 +597,49 @@ configure_chromium() {
     echo -e "${BLUE}=== CHROMIUM ===${RESET}"
     echo
 
-    if ! command -v chromium >/dev/null 2>&1 &&
-       ! command -v chromium-browser >/dev/null 2>&1; then
+    local CHROMIUM_BIN=""
+
+    if command_exists chromium; then
+        CHROMIUM_BIN="chromium"
+    elif command_exists chromium-browser; then
+        CHROMIUM_BIN="chromium-browser"
+    fi
+
+    if [[ -z "$CHROMIUM_BIN" ]]; then
 
         echo "Chromium kurulu değil."
 
         if ask_yes_no "Chromium kurulsun mu?"; then
 
-            if package_exists chromium; then
-                apt-get install -y chromium
-            else
-                echo -e "${YELLOW}Chromium deposunda bulunamadı.${RESET}"
-                return
+            if ! check_apt_lock; then
+                return 1
             fi
+
+            if package_exists chromium; then
+
+                if apt-get install -y chromium; then
+                    CHROMIUM_BIN="chromium"
+                else
+                    echo -e "${RED}Chromium kurulamadı.${RESET}"
+                    return 1
+                fi
+
+            else
+                echo -e "${YELLOW}Chromium APT depolarında bulunamadı.${RESET}"
+                return 1
+            fi
+
         else
-            return
+            return 0
         fi
     fi
 
-    install_if_available chromium-l10n
+    install_if_available chromium-l10n || true
 
+    echo -e "${GREEN}✓ Chromium Türkçe dil paketi kontrol edildi.${RESET}"
     echo
-    echo -e "${GREEN}✓ Chromium Türkçe desteği kontrol edildi.${RESET}"
-
-    # Chromium çalışıyorsa dosyasına dokunmuyoruz.
-    # Böylece çalışan tarayıcının ayar dosyası bozulmaz.
-
-    echo
-    echo "Chromium'da:"
-    echo "Ayarlar → Dil → Türkçe"
-    echo "seçilmelidir."
+    echo "Chromium'u yeniden başlattıktan sonra:"
+    echo "Ayarlar → Diller → Türkçe"
 
     log "Chromium Türkçe desteği kontrol edildi."
 }
@@ -402,22 +654,32 @@ configure_firefox() {
     echo -e "${BLUE}=== FIREFOX ===${RESET}"
     echo
 
-    if ! command -v firefox >/dev/null 2>&1 &&
-       ! command -v firefox-esr >/dev/null 2>&1; then
+    if ! command_exists firefox &&
+       ! command_exists firefox-esr; then
 
         echo "Firefox kurulu değil."
-        return
+        return 0
     fi
 
+    local INSTALLED=0
+
     if package_exists firefox-esr-l10n-tr; then
-        install_if_available firefox-esr-l10n-tr
+        install_if_available firefox-esr-l10n-tr || true
+        INSTALLED=1
     fi
 
     if package_exists firefox-l10n-tr; then
-        install_if_available firefox-l10n-tr
+        install_if_available firefox-l10n-tr || true
+        INSTALLED=1
     fi
 
-    echo -e "${GREEN}✓ Firefox Türkçe desteği kontrol edildi.${RESET}"
+    if [[ "$INSTALLED" -eq 0 ]]; then
+        echo -e "${YELLOW}Uygun Firefox Türkçe paketi depoda bulunamadı.${RESET}"
+    else
+        echo -e "${GREEN}✓ Firefox Türkçe desteği kontrol edildi.${RESET}"
+    fi
+
+    echo "Firefox'u yeniden başlatmanız gerekebilir."
 
     log "Firefox Türkçe desteği kontrol edildi."
 }
@@ -432,12 +694,12 @@ configure_libreoffice() {
     echo -e "${BLUE}=== LIBREOFFICE ===${RESET}"
     echo
 
-    if ! command -v libreoffice >/dev/null 2>&1; then
+    if ! command_exists libreoffice; then
         echo "LibreOffice kurulu değil."
-        return
+        return 0
     fi
 
-    install_if_available libreoffice-l10n-tr
+    install_if_available libreoffice-l10n-tr || true
 
     echo -e "${GREEN}✓ LibreOffice Türkçe desteği kontrol edildi.${RESET}"
 
@@ -459,13 +721,9 @@ configure_applications() {
     configure_libreoffice
 
     echo
-    echo "Ek olarak depoda bulunan Türkçe dil paketleri aranıyor."
+    echo -e "${GREEN}✓ Uygulama dil desteği kontrolü tamamlandı.${RESET}"
 
-    apt-cache search '(^|-)l10n-tr($|-)' 2>/dev/null |
-        head -50
-
-    echo
-    echo -e "${GREEN}✓ Uygulama kontrolü tamamlandı.${RESET}"
+    log "Uygulama Türkçe desteği kontrol edildi."
 }
 
 # ================================================================
@@ -475,66 +733,71 @@ configure_applications() {
 configure_man() {
 
     echo
-    echo -e "${BLUE}=== TÜRKÇE MANUAL SAYFALARI ===${RESET}"
+    echo -e "${BLUE}=== TÜRKÇE MAN SAYFALARI ===${RESET}"
     echo
 
-    install_if_available manpages-tr
-    install_if_available manpages-tr-dev
+    install_if_available manpages-tr || true
+    install_if_available manpages-tr-dev || true
 
-    echo
     echo -e "${GREEN}✓ Türkçe man paketleri kontrol edildi.${RESET}"
+
+    log "Türkçe man paketleri kontrol edildi."
 }
 
 # ================================================================
-# SUDO
+# SUDO YETKİSİ VER
 # ================================================================
 
 grant_sudo() {
 
     echo
-    echo -e "${BLUE}=== SUDO YETKİSİ ===${RESET}"
+    echo -e "${BLUE}=== SUDO YETKİSİ VER ===${RESET}"
     echo
 
-    if [[ -z "$TARGET_USER" ]]; then
-        echo -e "${RED}Kullanıcı tespit edilemedi.${RESET}"
-        return
+    local USER=""
+
+    read -r -p "Kullanıcı adı: " USER
+
+    if [[ -z "$USER" ]]; then
+        return 1
     fi
 
-    echo "Kullanıcı: $TARGET_USER"
-    echo
-    echo "Not: Kullanıcıyı doğrudan root yapmak yerine sudo grubuna"
-    echo "eklemek daha güvenlidir."
-    echo
+    if ! id "$USER" >/dev/null 2>&1; then
+        echo -e "${RED}Kullanıcı bulunamadı.${RESET}"
+        return 1
+    fi
 
-    if ! ask_yes_no "$TARGET_USER kullanıcısına sudo yetkisi verilsin mi?"; then
-        echo "İşlem iptal edildi."
-        return
+    if [[ "$USER" == "root" ]]; then
+        echo "root zaten yönetici."
+        return 0
     fi
 
     if getent group sudo >/dev/null 2>&1; then
 
-        usermod -aG sudo "$TARGET_USER"
-
-        echo -e "${GREEN}✓ $TARGET_USER sudo grubuna eklendi.${RESET}"
-        log "$TARGET_USER sudo grubuna eklendi."
+        if usermod -aG sudo "$USER"; then
+            echo -e "${GREEN}✓ $USER sudo grubuna eklendi.${RESET}"
+            log "$USER sudo grubuna eklendi."
+        fi
 
     elif getent group wheel >/dev/null 2>&1; then
 
-        usermod -aG wheel "$TARGET_USER"
-
-        echo -e "${GREEN}✓ $TARGET_USER wheel grubuna eklendi.${RESET}"
-        log "$TARGET_USER wheel grubuna eklendi."
+        if usermod -aG wheel "$USER"; then
+            echo -e "${GREEN}✓ $USER wheel grubuna eklendi.${RESET}"
+            log "$USER wheel grubuna eklendi."
+        fi
 
     else
         echo -e "${RED}sudo/wheel grubu bulunamadı.${RESET}"
+        return 1
     fi
 
     echo
-    echo "Değişikliğin aktif olması için oturum kapatılıp açılmalıdır."
+    echo "Değişikliğin aktif olması için kullanıcı oturumunu"
+    echo "kapatıp tekrar açmalıdır."
 }
 
 # ================================================================
-# SUDO KALDIR
+# SUDO YETKİSİ KALDIR
 # ================================================================
 
 remove_sudo() {
@@ -543,35 +806,39 @@ remove_sudo() {
     echo -e "${BLUE}=== SUDO YETKİSİNİ KALDIR ===${RESET}"
     echo
 
-    read -rp "Kullanıcı adı: " USER
+    local USER=""
+
+    read -r -p "Kullanıcı adı: " USER
 
     if ! id "$USER" >/dev/null 2>&1; then
         echo -e "${RED}Kullanıcı bulunamadı.${RESET}"
-        return
+        return 1
     fi
 
     if [[ "$USER" == "root" ]]; then
-        echo "root için bu işlem yapılmaz."
-        return
+        echo "root için işlem yapılmaz."
+        return 0
     fi
 
-    if ask_yes_no "$USER kullanıcısının sudo yetkisi kaldırılsın mı?"; then
-
-        if getent group sudo >/dev/null 2>&1; then
-            gpasswd -d "$USER" sudo 2>/dev/null || true
-        fi
-
-        if getent group wheel >/dev/null 2>&1; then
-            gpasswd -d "$USER" wheel 2>/dev/null || true
-        fi
-
-        echo -e "${GREEN}✓ Sudo yetkisi kaldırıldı.${RESET}"
-        log "$USER sudo yetkisi kaldırıldı."
+    if ! ask_yes_no "$USER kullanıcısının sudo yetkisi kaldırılsın mı?"; then
+        return 0
     fi
+
+    if getent group sudo >/dev/null 2>&1; then
+        gpasswd -d "$USER" sudo >/dev/null 2>&1 || true
+    fi
+
+    if getent group wheel >/dev/null 2>&1; then
+        gpasswd -d "$USER" wheel >/dev/null 2>&1 || true
+    fi
+
+    echo -e "${GREEN}✓ Grup tabanlı sudo yetkisi kaldırıldı.${RESET}"
+
+    log "$USER sudo/wheel gruplarından çıkarıldı."
 }
 
 # ================================================================
-# KULLANICI LİSTESİ
+# KULLANICI LİSTELE
 # ================================================================
 
 list_users() {
@@ -580,12 +847,16 @@ list_users() {
     echo -e "${BLUE}=== NORMAL KULLANICILAR ===${RESET}"
     echo
 
-    printf "%-20s %-10s %-30s\n" "KULLANICI" "UID" "HOME"
-    echo "------------------------------------------------------------"
+    printf "%-22s %-8s %-35s\n" \
+        "KULLANICI" "UID" "HOME"
 
-    awk -F: '$3 >= 1000 && $3 < 60000 {
-        printf "%-20s %-10s %-30s\n",$1,$3,$6
-    }' /etc/passwd
+    echo "----------------------------------------------------------------"
+
+    awk -F: '
+        $3 >= 1000 && $3 < 60000 {
+            printf "%-22s %-8s %-35s\n",$1,$3,$6
+        }
+    ' /etc/passwd
 }
 
 # ================================================================
@@ -598,41 +869,49 @@ create_user() {
     echo -e "${BLUE}=== KULLANICI OLUŞTUR ===${RESET}"
     echo
 
-    read -rp "Yeni kullanıcı adı: " NEW_USER
+    local NEW_USER=""
+
+    read -r -p "Yeni kullanıcı adı: " NEW_USER
 
     if [[ ! "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
         echo -e "${RED}Geçersiz kullanıcı adı.${RESET}"
-        return
+        return 1
     fi
 
     if id "$NEW_USER" >/dev/null 2>&1; then
         echo -e "${RED}Bu kullanıcı zaten mevcut.${RESET}"
-        return
+        return 1
     fi
 
-    if useradd -m -s /bin/bash "$NEW_USER"; then
+    if ! useradd \
+        -m \
+        -s /bin/bash \
+        "$NEW_USER"; then
 
-        echo -e "${GREEN}✓ Kullanıcı oluşturuldu.${RESET}"
+        echo -e "${RED}Kullanıcı oluşturulamadı.${RESET}"
+        return 1
+    fi
 
-        passwd "$NEW_USER"
+    echo -e "${GREEN}✓ Kullanıcı oluşturuldu.${RESET}"
 
-        echo
-        if ask_yes_no "$NEW_USER kullanıcısına sudo yetkisi verilsin mi?"; then
+    if ! passwd "$NEW_USER"; then
+        echo -e "${YELLOW}Şifre ayarlanamadı.${RESET}"
+    fi
 
-            if getent group sudo >/dev/null 2>&1; then
-                usermod -aG sudo "$NEW_USER"
-            elif getent group wheel >/dev/null 2>&1; then
-                usermod -aG wheel "$NEW_USER"
-            fi
+    echo
 
-            echo -e "${GREEN}✓ Sudo yetkisi verildi.${RESET}"
+    if ask_yes_no "$NEW_USER kullanıcısına sudo yetkisi verilsin mi?"; then
+
+        if getent group sudo >/dev/null 2>&1; then
+            usermod -aG sudo "$NEW_USER"
+        elif getent group wheel >/dev/null 2>&1; then
+            usermod -aG wheel "$NEW_USER"
         fi
 
-        log "Yeni kullanıcı oluşturuldu: $NEW_USER"
-
-    else
-        echo -e "${RED}Kullanıcı oluşturulamadı.${RESET}"
+        echo -e "${GREEN}✓ Sudo yetkisi verildi.${RESET}"
     fi
+
+    log "Yeni kullanıcı oluşturuldu: $NEW_USER"
 }
 
 # ================================================================
@@ -645,16 +924,22 @@ change_password() {
     echo -e "${BLUE}=== ŞİFRE DEĞİŞTİR ===${RESET}"
     echo
 
-    read -rp "Kullanıcı adı: " USER
+    local USER=""
+
+    read -r -p "Kullanıcı adı: " USER
 
     if ! id "$USER" >/dev/null 2>&1; then
         echo -e "${RED}Kullanıcı bulunamadı.${RESET}"
-        return
+        return 1
     fi
 
-    passwd "$USER"
-
-    log "$USER şifresi değiştirildi."
+    if passwd "$USER"; then
+        echo -e "${GREEN}✓ Şifre değiştirildi.${RESET}"
+        log "$USER şifresi değiştirildi."
+    else
+        echo -e "${RED}Şifre değiştirilemedi.${RESET}"
+        return 1
+    fi
 }
 
 # ================================================================
@@ -667,70 +952,93 @@ change_username() {
     echo -e "${BLUE}=== KULLANICI ADI DEĞİŞTİR ===${RESET}"
     echo
 
-    read -rp "Mevcut kullanıcı: " OLD_USER
+    local OLD_USER=""
+    local NEW_USER=""
+    local OLD_HOME=""
+    local NEW_HOME=""
+
+    read -r -p "Mevcut kullanıcı: " OLD_USER
 
     if ! id "$OLD_USER" >/dev/null 2>&1; then
         echo -e "${RED}Kullanıcı bulunamadı.${RESET}"
-        return
+        return 1
     fi
 
     if [[ "$OLD_USER" == "root" ]]; then
-        echo -e "${RED}root kullanıcı adı bu araçtan değiştirilmez.${RESET}"
-        return
+        echo -e "${RED}root kullanıcı adı değiştirilemez.${RESET}"
+        return 1
     fi
 
-    # Aktif kullanıcıyı değiştirmeyi engelle
     if [[ "$OLD_USER" == "$TARGET_USER" ]]; then
         echo
-        echo -e "${RED}Aktif oturumdaki kullanıcı değiştirilemez.${RESET}"
-        echo "Önce başka bir yönetici hesabıyla oturum açın."
-        return
+        echo -e "${RED}Aktif kullanıcı değiştirilemez.${RESET}"
+        echo "Başka bir yönetici hesabıyla oturum açın."
+        return 1
     fi
 
-    read -rp "Yeni kullanıcı adı: " NEW_USER
+    # Çalışan süreç kontrolü
+    if command_exists pgrep; then
+
+        if pgrep -u "$OLD_USER" >/dev/null 2>&1; then
+            echo -e "${RED}Kullanıcının çalışan süreçleri var.${RESET}"
+            echo "Önce kullanıcı oturumunu kapatın."
+            return 1
+        fi
+    fi
+
+    read -r -p "Yeni kullanıcı adı: " NEW_USER
 
     if [[ ! "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
         echo -e "${RED}Geçersiz kullanıcı adı.${RESET}"
-        return
+        return 1
     fi
 
     if id "$NEW_USER" >/dev/null 2>&1; then
         echo -e "${RED}Bu kullanıcı zaten mevcut.${RESET}"
-        return
+        return 1
     fi
+
+    OLD_HOME="$(getent passwd "$OLD_USER" | cut -d: -f6)"
+    NEW_HOME="/home/$NEW_USER"
 
     echo
     echo "Eski kullanıcı : $OLD_USER"
     echo "Yeni kullanıcı : $NEW_USER"
+    echo "Eski HOME      : $OLD_HOME"
+    echo "Yeni HOME      : $NEW_HOME"
     echo
 
-    if ! ask_yes_no "Kullanıcı adı değiştirilsin mi?"; then
-        return
+    if ! ask_yes_no "Değişiklik yapılsın mı?"; then
+        return 0
     fi
 
-    if usermod -l "$NEW_USER" "$OLD_USER"; then
+    create_backup
 
-        OLD_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6)
-
-        if [[ "$OLD_HOME" == "/home/$OLD_USER" &&
-              -d "/home/$OLD_USER" ]]; then
-
-            usermod -d "/home/$NEW_USER" -m "$NEW_USER"
-        fi
-
-        if getent group "$OLD_USER" >/dev/null 2>&1; then
-            groupmod -n "$NEW_USER" "$OLD_USER" 2>/dev/null || true
-        fi
-
-        echo -e "${GREEN}✓ Kullanıcı adı değiştirildi.${RESET}"
-        echo "Eski: $OLD_USER"
-        echo "Yeni: $NEW_USER"
-
-        log "Kullanıcı adı değiştirildi: $OLD_USER -> $NEW_USER"
-
-    else
+    if ! usermod -l "$NEW_USER" "$OLD_USER"; then
         echo -e "${RED}Kullanıcı adı değiştirilemedi.${RESET}"
+        return 1
     fi
+
+    # Home dizini standart /home/OLD_USER ise taşı.
+    if [[ "$OLD_HOME" == "/home/$OLD_USER" &&
+          -d "$OLD_HOME" ]]; then
+
+        if usermod -d "$NEW_HOME" -m "$NEW_USER"; then
+            echo -e "${GREEN}✓ HOME dizini taşındı.${RESET}"
+        else
+            echo -e "${YELLOW}HOME dizini taşınamadı.${RESET}"
+        fi
+    fi
+
+    # Aynı isimde primary group varsa değiştir.
+    if getent group "$OLD_USER" >/dev/null 2>&1; then
+        groupmod -n "$NEW_USER" "$OLD_USER" \
+            >/dev/null 2>&1 || true
+    fi
+
+    echo -e "${GREEN}✓ Kullanıcı adı değiştirildi.${RESET}"
+
+    log "Kullanıcı adı değiştirildi: $OLD_USER -> $NEW_USER"
 }
 
 # ================================================================
@@ -743,33 +1051,46 @@ delete_user() {
     echo -e "${BLUE}=== KULLANICI SİL ===${RESET}"
     echo
 
-    read -rp "Silinecek kullanıcı: " USER
+    local USER=""
+
+    read -r -p "Silinecek kullanıcı: " USER
 
     if ! id "$USER" >/dev/null 2>&1; then
         echo -e "${RED}Kullanıcı bulunamadı.${RESET}"
-        return
+        return 1
     fi
 
     if [[ "$USER" == "root" ]]; then
         echo -e "${RED}root silinemez.${RESET}"
-        return
+        return 1
     fi
 
     if [[ "$USER" == "$TARGET_USER" ]]; then
         echo -e "${RED}Aktif kullanıcı silinemez.${RESET}"
-        return
+        return 1
+    fi
+
+    if command_exists pgrep &&
+       pgrep -u "$USER" >/dev/null 2>&1; then
+
+        echo -e "${RED}Kullanıcının çalışan süreçleri var.${RESET}"
+        echo "Önce kullanıcı oturumunu kapatın."
+        return 1
     fi
 
     echo
-    echo -e "${YELLOW}UYARI: Kullanıcı hesabı silinecek.${RESET}"
-    echo
+    echo -e "${YELLOW}UYARI: Kullanıcı ve HOME dizini silinecek.${RESET}"
 
-    if ask_yes_no "$USER kullanıcısı ve HOME dizini silinsin mi?"; then
+    if ! ask_yes_no "$USER tamamen silinsin mi?"; then
+        return 0
+    fi
 
-        userdel -r "$USER"
-
+    if userdel -r "$USER"; then
         echo -e "${GREEN}✓ Kullanıcı silindi.${RESET}"
         log "Kullanıcı silindi: $USER"
+    else
+        echo -e "${RED}Kullanıcı silinemedi.${RESET}"
+        return 1
     fi
 }
 
@@ -780,44 +1101,63 @@ delete_user() {
 change_hostname() {
 
     echo
-    echo -e "${BLUE}=== BİLGİSAYAR ADI ===${RESET}"
+    echo -e "${BLUE}=== HOSTNAME ===${RESET}"
     echo
 
-    CURRENT_HOST=$(hostname)
+    local CURRENT_HOST=""
+    local NEW_HOST=""
+
+    CURRENT_HOST="$(hostname)"
 
     echo "Mevcut hostname: $CURRENT_HOST"
     echo
 
-    read -rp "Yeni hostname: " NEW_HOST
+    read -r -p "Yeni hostname: " NEW_HOST
 
-    if [[ ! "$NEW_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]; then
+    if [[ ! "$NEW_HOST" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
         echo -e "${RED}Geçersiz hostname.${RESET}"
-        return
+        return 1
     fi
 
     if ! ask_yes_no "Hostname '$NEW_HOST' olarak değiştirilsin mi?"; then
-        return
+        return 0
     fi
 
     create_backup
 
-    hostnamectl set-hostname "$NEW_HOST"
+    if command_exists hostnamectl; then
 
-    echo -e "${GREEN}✓ Hostname değiştirildi.${RESET}"
+        if hostnamectl set-hostname "$NEW_HOST"; then
+            echo -e "${GREEN}✓ Hostname değiştirildi.${RESET}"
+        else
+            echo -e "${RED}Hostname değiştirilemedi.${RESET}"
+            return 1
+        fi
 
-    log "Hostname değiştirildi: $CURRENT_HOST -> $NEW_HOST"
+    else
+
+        echo "$NEW_HOST" > /etc/hostname
+        hostname "$NEW_HOST" 2>/dev/null || true
+
+        echo -e "${GREEN}✓ Hostname değiştirildi.${RESET}"
+    fi
+
+    log "Hostname: $CURRENT_HOST -> $NEW_HOST"
 }
 
 # ================================================================
-# SISTEM BİLGİLERİ
+# SİSTEM BİLGİLERİ
 # ================================================================
 
 system_info() {
 
+    detect_target_user
+    detect_desktop
+
     echo
-    echo -e "${BLUE}================================================${RESET}"
-    echo -e "${BLUE}                 SİSTEM BİLGİLERİ               ${RESET}"
-    echo -e "${BLUE}================================================${RESET}"
+    echo -e "${CYAN}================================================${RESET}"
+    echo -e "${CYAN}              SİSTEM BİLGİLERİ                 ${RESET}"
+    echo -e "${CYAN}================================================${RESET}"
     echo
 
     echo -e "${WHITE}Dağıtım:${RESET}"
@@ -836,8 +1176,12 @@ system_info() {
     hostname
 
     echo
-    echo -e "${WHITE}Aktif kullanıcı:${RESET}"
+    echo -e "${WHITE}Kullanıcı:${RESET}"
     echo "${TARGET_USER:-Bilinmiyor}"
+
+    echo
+    echo -e "${WHITE}Masaüstü:${RESET}"
+    echo "${DESKTOP:-Bilinmiyor}"
 
     echo
     echo -e "${WHITE}Locale:${RESET}"
@@ -845,19 +1189,28 @@ system_info() {
 
     echo
     echo -e "${WHITE}Klavye:${RESET}"
-    cat /etc/default/keyboard 2>/dev/null
-
-    echo
-    echo -e "${WHITE}Masaüstü:${RESET}"
-    echo "${XDG_CURRENT_DESKTOP:-Tespit edilemedi}"
+    if [[ -f /etc/default/keyboard ]]; then
+        cat /etc/default/keyboard
+    else
+        echo "Bulunamadı."
+    fi
 
     echo
     echo -e "${WHITE}Shell:${RESET}"
-    echo "${SHELL:-Bilinmiyor}"
+    if [[ -n "$TARGET_USER" ]]; then
+        getent passwd "$TARGET_USER" |
+            cut -d: -f7
+    else
+        echo "Bilinmiyor"
+    fi
 
     echo
     echo -e "${WHITE}Disk:${RESET}"
     df -h / | tail -1
+
+    echo
+    echo -e "${WHITE}RAM:${RESET}"
+    free -h | awk '/^Mem:/ {print $0}'
 }
 
 # ================================================================
@@ -867,99 +1220,233 @@ system_info() {
 search_turkish_packages() {
 
     echo
-    echo -e "${BLUE}=== TÜRKÇE DİL PAKETLERİ ===${RESET}"
+    echo -e "${BLUE}=== TÜRKÇE PAKETLER ===${RESET}"
     echo
 
-    echo "Depolardaki Türkçe/l10n paketleri aranıyor..."
+    if ! command_exists apt-cache; then
+        echo -e "${RED}apt-cache bulunamadı.${RESET}"
+        return 1
+    fi
+
+    echo "Türkçe / l10n paketleri aranıyor..."
     echo
 
-    apt-cache search 'tr$|tr-' 2>/dev/null |
-        grep -Ei '(^| )(turkish|turkce|Türkçe|l10n.*tr|tr.*l10n)' |
+    apt-cache search turkish 2>/dev/null |
         head -100
 
     echo
-    echo "Doğrudan -tr paketleri:"
+    echo "Türkçe l10n paketleri:"
     echo
 
-    apt-cache search '-tr$' 2>/dev/null |
+    apt-cache search l10n 2>/dev/null |
+        grep -Ei '(^|[-[:space:]])(tr|turkish)([-[:space:]]|$)' |
         head -100
 }
 
 # ================================================================
-# SİSTEM GÜNCELLEME
+# PAKET LİSTESİ GÜNCELLE
 # ================================================================
 
 update_package_list() {
 
     echo
-    echo -e "${BLUE}=== PAKET LİSTESİNİ GÜNCELLE ===${RESET}"
+    echo -e "${BLUE}=== APT UPDATE ===${RESET}"
     echo
 
-    echo "apt update çalıştırılacak."
-    echo "Bu işlem kurulu paketleri yükseltmez."
+    echo "Kurulu paketler yükseltilmeyecek."
+    echo "Sadece paket listesi güncellenecek."
+    echo
 
-    if ask_yes_no "Devam edilsin mi?"; then
-
-        apt-get update
-
-        echo
-        echo -e "${GREEN}✓ Paket listesi güncellendi.${RESET}"
-
-        log "apt update çalıştırıldı."
+    if ! ask_yes_no "Devam edilsin mi?"; then
+        return 0
     fi
+
+    update_package_list_silent
 }
 
 # ================================================================
-# TÜRKÇE TAM KURULUM
+# TAM TÜRKÇELEŞTİRME
 # ================================================================
 
 full_turkish_setup() {
 
     echo
-    echo -e "${CYAN}================================================${RESET}"
-    echo -e "${CYAN}          TAM TÜRKÇE SİSTEM KURULUMU            ${RESET}"
-    echo -e "${CYAN}================================================${RESET}"
+    echo -e "${CYAN}============================================================${RESET}"
+    echo -e "${CYAN}             TAM TÜRKÇELEŞTİRME KURULUMU                   ${RESET}"
+    echo -e "${CYAN}============================================================${RESET}"
     echo
 
-    echo "Bu işlem:"
+    echo "Yapılacak işlemler:"
+    echo
     echo " • Türkçe locale"
     echo " • Türkçe Q klavye"
     echo " • Türkçe fontlar"
-    echo " • GNOME/KDE ayarları"
-    echo " • Chromium"
-    echo " • Firefox"
-    echo " • LibreOffice"
+    echo " • GNOME / KDE kontrolü"
+    echo " • Chromium Türkçe desteği"
+    echo " • Firefox Türkçe desteği"
+    echo " • LibreOffice Türkçe desteği"
     echo " • Türkçe man sayfaları"
-    echo "desteğini kontrol edecektir."
     echo
     echo "Mevcut olmayan paketler zorla kurulmayacaktır."
     echo
 
-    if ! ask_yes_no "Devam edilsin mi?"; then
-        return
+    if ! ask_yes_no "Kurulum başlatılsın mı?"; then
+        return 0
+    fi
+
+    if ! check_apt_lock; then
+        return 1
     fi
 
     create_backup
 
-    configure_locale
-    configure_keyboard
-    configure_fonts
-    configure_gnome
-    configure_kde
-    configure_chromium
-    configure_firefox
-    configure_libreoffice
-    configure_man
+    echo
+    echo -e "${CYAN}[1/8] Paket listesi${RESET}"
+    update_package_list_silent || true
 
     echo
-    echo -e "${GREEN}================================================${RESET}"
-    echo -e "${GREEN}          TÜRKÇE KURULUM TAMAMLANDI             ${RESET}"
-    echo -e "${GREEN}================================================${RESET}"
-    echo
-    echo "Bazı uygulamalar dili yeni oturum açıldığında algılar."
-    echo "Sistemi yeniden başlatmanız önerilir."
+    echo -e "${CYAN}[2/8] Locale${RESET}"
+    configure_locale || true
 
-    log "Tam Türkçe kurulum tamamlandı."
+    echo
+    echo -e "${CYAN}[3/8] Klavye${RESET}"
+    configure_keyboard || true
+
+    echo
+    echo -e "${CYAN}[4/8] Fontlar${RESET}"
+    configure_fonts || true
+
+    echo
+    echo -e "${CYAN}[5/8] Masaüstü${RESET}"
+    configure_gnome || true
+    configure_kde || true
+
+    echo
+    echo -e "${CYAN}[6/8] Uygulamalar${RESET}"
+    configure_chromium || true
+    configure_firefox || true
+    configure_libreoffice || true
+
+    echo
+    echo -e "${CYAN}[7/8] Man sayfaları${RESET}"
+    configure_man || true
+
+    echo
+    echo -e "${CYAN}[8/8] Son kontroller${RESET}"
+
+    detect_target_user
+    detect_desktop
+
+    echo
+    echo -e "${GREEN}============================================================${RESET}"
+    echo -e "${GREEN}             TÜRKÇELEŞTİRME TAMAMLANDI                     ${RESET}"
+    echo -e "${GREEN}============================================================${RESET}"
+    echo
+
+    echo "Kullanıcı : ${TARGET_USER:-Bilinmiyor}"
+    echo "Masaüstü  : ${DESKTOP:-Bilinmiyor}"
+    echo "Yedek     : ${BACKUP_DIR:-Oluşturulmadı}"
+    echo
+    echo "Bazı uygulamalar için yeniden başlatma gerekebilir."
+    echo
+
+    log "Tam Türkçeleştirme tamamlandı."
+}
+
+# ================================================================
+# YEDEK BİLGİSİ
+# ================================================================
+
+show_backup() {
+
+    echo
+    echo -e "${BLUE}=== SON YEDEK ===${RESET}"
+    echo
+
+    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+        echo "$BACKUP_DIR"
+        ls -lah "$BACKUP_DIR"
+    else
+        echo "Bu çalıştırmada yedek oluşturulmadı."
+    fi
+}
+
+# ================================================================
+# SUDO / KULLANICI MENÜSÜ
+# ================================================================
+
+user_menu() {
+
+    while true; do
+
+        clear
+
+        echo
+        echo -e "${CYAN}============================================================${RESET}"
+        echo -e "${CYAN}                  KULLANICI YÖNETİMİ                        ${RESET}"
+        echo -e "${CYAN}============================================================${RESET}"
+        echo
+        echo " 1) Kullanıcıları listele"
+        echo " 2) Kullanıcı oluştur"
+        echo " 3) Şifre değiştir"
+        echo " 4) Kullanıcı adı değiştir"
+        echo " 5) Kullanıcı sil"
+        echo " 6) Sudo yetkisi ver"
+        echo " 7) Sudo yetkisini kaldır"
+        echo " 0) Geri"
+        echo
+
+        local CHOICE=""
+
+        read -r -p "Seçim: " CHOICE
+
+        case "$CHOICE" in
+
+            1)
+                list_users
+                pause
+                ;;
+
+            2)
+                create_user
+                pause
+                ;;
+
+            3)
+                change_password
+                pause
+                ;;
+
+            4)
+                change_username
+                pause
+                ;;
+
+            5)
+                delete_user
+                pause
+                ;;
+
+            6)
+                grant_sudo
+                pause
+                ;;
+
+            7)
+                remove_sudo
+                pause
+                ;;
+
+            0)
+                return
+                ;;
+
+            *)
+                echo -e "${RED}Geçersiz seçim.${RESET}"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # ================================================================
@@ -982,54 +1469,34 @@ reboot_system() {
 }
 
 # ================================================================
-# KULLANICI MENÜSÜ
+# BAŞLANGIÇ
 # ================================================================
 
-user_menu() {
+clear
 
-    while true; do
+echo
+echo -e "${CYAN}============================================================${RESET}"
+echo -e "${CYAN}       LINUX TÜRKÇELEŞTİRME & YÖNETİM ARACI                ${RESET}"
+echo -e "${CYAN}                         v$VERSION                          ${RESET}"
+echo -e "${CYAN}============================================================${RESET}"
+echo
+echo -e "${GREEN}Sistem:${RESET} ${PRETTY_NAME:-Bilinmiyor}"
+echo -e "${GREEN}Kullanıcı:${RESET} ${TARGET_USER:-Bilinmiyor}"
+echo -e "${GREEN}Masaüstü:${RESET} ${DESKTOP:-Bilinmiyor}"
+echo
+echo "Log: $LOG_FILE"
+echo
 
-        clear
-
-        echo
-        echo -e "${CYAN}============================================================${RESET}"
-        echo -e "${CYAN}                    KULLANICI YÖNETİMİ                       ${RESET}"
-        echo -e "${CYAN}============================================================${RESET}"
-        echo
-        echo " 1) Kullanıcıları listele"
-        echo " 2) Kullanıcı oluştur"
-        echo " 3) Kullanıcı şifresi değiştir"
-        echo " 4) Kullanıcı adı değiştir"
-        echo " 5) Kullanıcı sil"
-        echo " 6) Sudo yetkisi ver"
-        echo " 7) Sudo yetkisini kaldır"
-        echo " 0) Geri"
-        echo
-
-        read -rp "Seçim: " CHOICE
-
-        case "$CHOICE" in
-
-            1) list_users; pause ;;
-            2) create_user; pause ;;
-            3) change_password; pause ;;
-            4) change_username; pause ;;
-            5) delete_user; pause ;;
-            6) grant_sudo; pause ;;
-            7) remove_sudo; pause ;;
-            0) return ;;
-            *) echo "Geçersiz seçim."; sleep 1 ;;
-
-        esac
-
-    done
-}
+log "Program başlatıldı. Sürüm: $VERSION"
 
 # ================================================================
 # ANA MENÜ
 # ================================================================
 
 while true; do
+
+    detect_target_user
+    detect_desktop
 
     clear
 
@@ -1040,15 +1507,16 @@ while true; do
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════╣${RESET}"
     echo -e "${CYAN}║${RESET} Sistem   : ${WHITE}${PRETTY_NAME:-Bilinmiyor}${RESET}"
     echo -e "${CYAN}║${RESET} Kullanıcı: ${WHITE}${TARGET_USER:-Bilinmiyor}${RESET}"
+    echo -e "${CYAN}║${RESET} Masaüstü : ${WHITE}${DESKTOP:-Bilinmiyor}${RESET}"
     echo -e "${CYAN}║${RESET} Hostname : ${WHITE}$(hostname)${RESET}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════╣${RESET}"
     echo -e "${CYAN}║${RESET}"
-    echo -e "${CYAN}║${RESET}  1) 🇹🇷 Tam Türkçe sistem kurulumu"
+    echo -e "${CYAN}║${RESET}  1) 🇹🇷 Tam Türkçeleştirme"
     echo -e "${CYAN}║${RESET}  2) 🌍 Sistem dili / Locale"
     echo -e "${CYAN}║${RESET}  3) ⌨️  Türkçe Q klavye"
-    echo -e "${CYAN}║${RESET}  4) 🖥️  GNOME / KDE ayarları"
+    echo -e "${CYAN}║${RESET}  4) 🖥️  GNOME / KDE"
     echo -e "${CYAN}║${RESET}  5) 🌐 Uygulamaları Türkçeleştir"
-    echo -e "${CYAN}║${RESET}  6) 🔤 Türkçe fontları kur"
+    echo -e "${CYAN}║${RESET}  6) 🔤 Türkçe fontlar"
     echo -e "${CYAN}║${RESET}  7) 📖 Türkçe man sayfaları"
     echo -e "${CYAN}║${RESET}  8) 🔎 Türkçe paketleri ara"
     echo -e "${CYAN}║${RESET}"
@@ -1056,16 +1524,19 @@ while true; do
     echo -e "${CYAN}║${RESET} 10) 💻 Hostname değiştir"
     echo -e "${CYAN}║${RESET}"
     echo -e "${CYAN}║${RESET} 11) 📊 Sistem bilgileri"
-    echo -e "${CYAN}║${RESET} 12) 🔄 Paket listesini güncelle"
-    echo -e "${CYAN}║${RESET} 13) 🔁 Yeniden başlat"
+    echo -e "${CYAN}║${RESET} 12) 🔄 APT paket listesini güncelle"
+    echo -e "${CYAN}║${RESET} 13) 💾 Son yedeği göster"
+    echo -e "${CYAN}║${RESET} 14) 🔁 Yeniden başlat"
     echo -e "${CYAN}║${RESET}  0) ❌ Çıkış"
     echo -e "${CYAN}║${RESET}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${RESET}"
     echo
 
-    read -rp "Seçiminiz: " CHOICE
+    local_choice=""
 
-    case "$CHOICE" in
+    read -r -p "Seçiminiz: " local_choice
+
+    case "$local_choice" in
 
         1)
             full_turkish_setup
@@ -1128,12 +1599,18 @@ while true; do
             ;;
 
         13)
+            show_backup
+            pause
+            ;;
+
+        14)
             reboot_system
             ;;
 
         0)
             echo
             echo -e "${GREEN}Çıkış yapılıyor.${RESET}"
+            log "Program kapatıldı."
             exit 0
             ;;
 
@@ -1141,7 +1618,6 @@ while true; do
             echo -e "${RED}Geçersiz seçim.${RESET}"
             sleep 1
             ;;
-
     esac
 
 done
