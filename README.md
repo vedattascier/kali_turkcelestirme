@@ -1,23 +1,23 @@
 ````markdown
 # 🇹🇷 Linux Türkçeleştirme & Pentest Kurulum Aracı
 
-Modern Kali Linux, Debian ve Ubuntu tabanlı sistemler için hazırlanmış, Bash tabanlı otomatik kurulum aracıdır.
+Kali Linux, Debian ve Ubuntu tabanlı sistemler için hazırlanmış Bash tabanlı otomatik kurulum aracıdır.
 
-Script; sistemi Türkçeleştirmek, Türkçe Q klavye yapılandırmasını yapmak, gerekli dil paketlerini kurmak ve yetkili güvenlik testleri için kullanılan araçları tek bir işlem akışında hazırlamak üzere tasarlanmıştır.
+Sistem dilini Türkçeleştirir, Türkçe Q klavye yapılandırır ve isteğe bağlı olarak çeşitli güvenlik, pentest, reverse engineering, web, network, forensics ve yardımcı araçları otomatik olarak kurar.
 
-> **Kali Linux öncelikli kullanım hedeflenmiştir.**
+> **Kali Linux öncelikli olarak geliştirilmiştir.**
 
 ---
 
 ## ✨ Özellikler
 
-- 🇹🇷 Türkçe sistem locale yapılandırması
+- 🇹🇷 Türkçe sistem dili
 - ⌨️ Türkçe Q klavye
-- 🖥️ GNOME / KDE Plasma / XFCE desteği
+- 🖥️ GNOME, KDE Plasma ve XFCE desteği
 - 🔤 Türkçe karakter destekli fontlar
-- 🌐 Firefox / Chromium / LibreOffice dil paketleri
+- 🌐 Firefox / Chromium / LibreOffice Türkçe dil paketleri
 - 📖 Türkçe man sayfaları
-- 🛡️ Pentest ve güvenlik araçları
+- 🛡️ Pentest araçları
 - 🧩 Reverse engineering araçları
 - 📱 Android analiz araçları
 - 🪟 Windows / Active Directory / SMB araçları
@@ -27,24 +27,24 @@ Script; sistemi Türkçeleştirmek, Türkçe Q klavye yapılandırmasını yapma
 - 📡 Wireless araçları
 - 🖼️ Steganography / Forensics araçları
 - 🟢 GVM / OpenVAS
-- 🛠️ Yardımcı masaüstü ve terminal araçları
+- 🛠️ Yardımcı terminal ve masaüstü araçları
 - 💾 Sistem ayarları için otomatik yedekleme
-- 📝 Ayrıntılı loglama
-- 📦 Paket bulunamazsa kurulumun tamamını durdurmayan yapı
+- 📝 Loglama
+- 📦 Bulunmayan paketleri atlayarak kuruluma devam etme
 
 ---
 
 # 🚀 Kurulum
 
-## Tek komutla çalıştırma
+## Tek komut
 
-GitHub üzerinden doğrudan:
+GitHub üzerinden doğrudan çalıştır:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh | sudo bash
 ````
 
-## Manuel kullanım
+## Manuel kurulum
 
 Repository'yi klonla:
 
@@ -58,13 +58,13 @@ Dizine gir:
 cd kali_turkcelestirme
 ```
 
-Çalıştırılabilir yap:
+Scripti çalıştırılabilir yap:
 
 ```bash
 chmod +x linux-turkce.sh
 ```
 
-Scripti çalıştır:
+Çalıştır:
 
 ```bash
 sudo ./linux-turkce.sh
@@ -74,46 +74,33 @@ sudo ./linux-turkce.sh
 
 # 🧭 Çalışma Mantığı
 
-Script başlatıldığında gereksiz menülerle uğraştırmaz.
+Script gereksiz menüler kullanmaz.
 
-İki temel soru sorar:
+Çalıştırıldığında iki temel soru sorar:
 
 ```text
 Linux Türkçe yapılsın mı? [E/h]:
+
 Pentest araçları kurulsun mu? [E/h]:
 ```
 
-Seçimlere göre kurulum otomatik devam eder.
-
----
-
-## 1. APT Hazırlığı
-
-Paket kurulmadan önce APT paket listeleri güncellenir:
-
-```bash
-apt-get update
-```
-
-APT güncellemesi başarısız olursa paket kurulumu başlatılmaz.
-
-Bu sayede eski paket indekslerinden kaynaklanan kurulum sorunları azaltılır.
+Seçimlerin ardından kurulum otomatik olarak devam eder.
 
 ---
 
 # 🇹🇷 Türkçeleştirme
 
-Türkçeleştirme seçildiğinde aşağıdaki işlemler otomatik yapılır.
+Türkçeleştirme seçilirse aşağıdaki işlemler yapılır.
 
-### Locale
+## Locale
 
 ```text
 tr_TR.UTF-8
 ```
 
-yapılandırılır.
+locale yapılandırılır.
 
-Oluşturulan temel dosyalar:
+Temel dosyalar:
 
 ```text
 /etc/locale.gen
@@ -121,32 +108,26 @@ Oluşturulan temel dosyalar:
 /etc/profile.d/turkish-locale.sh
 ```
 
-### Klavye
+## Klavye
 
-Türkçe Q klavye:
+Türkçe Q klavye yapılandırılır:
 
 ```text
 XKBMODEL="pc105"
 XKBLAYOUT="tr"
 ```
 
-şeklinde ayarlanır.
+## Masaüstü
 
-### Masaüstü
-
-Algılanan masaüstüne göre:
+Algılanan masaüstüne göre gerekli ayarlar uygulanır:
 
 * GNOME
 * KDE Plasma
 * XFCE
 
-için uygun locale işlemleri uygulanır.
+## Fontlar
 
-### Fontlar
-
-Türkçe karakter desteği için uygun font paketleri kontrol edilir.
-
-Örneğin:
+Türkçe karakter desteği için:
 
 ```text
 fonts-dejavu
@@ -156,21 +137,21 @@ fonts-noto-cjk
 fonts-noto-mono
 ```
 
-### Uygulamalar
+paketleri kontrol edilir.
+
+## Uygulamalar
 
 Depoda mevcut olması durumunda:
 
-```text
-Firefox Türkçe
-Chromium Türkçe
-LibreOffice Türkçe
-```
+* Firefox Türkçe
+* Chromium Türkçe
+* LibreOffice Türkçe
 
 dil paketleri kurulur.
 
-### Man Sayfaları
+## Man Sayfaları
 
-Mevcutsa:
+Depoda bulunması halinde:
 
 ```text
 manpages-tr
@@ -183,7 +164,7 @@ kurulur.
 
 # 🛡️ Pentest Araçları
 
-Pentest seçeneği etkinleştirildiğinde araçlar kategorilere göre kurulmaya çalışılır.
+Pentest seçildiğinde güvenlik araçları kategorilere ayrılarak kurulmaya çalışılır.
 
 ## 🌐 Web / Recon
 
@@ -235,15 +216,29 @@ ltrace
 binutils
 ```
 
-Özellikle:
+Kullanım alanları:
 
-* Binary analizi
-* APK/DEX analizi
+* Binary analysis
 * Static analysis
+* Dynamic analysis
 * Debugging
+* APK / DEX analizi
 * Reverse engineering
 
-çalışmaları için tasarlanmıştır.
+---
+
+## 📱 Android
+
+```text
+JADX
+APKTool
+Dex2Jar
+Bytecode Viewer
+Ghidra
+Rizin
+```
+
+Android uygulamalarının statik ve dinamik analiz çalışmalarında kullanılabilir.
 
 ---
 
@@ -263,7 +258,7 @@ Responder
 BloodyAD
 ```
 
-Windows ve Active Directory laboratuvarları için gerekli araçların kurulumu hedeflenir.
+Windows ve Active Directory laboratuvarlarında kullanılmak üzere hazırlanmıştır.
 
 ---
 
@@ -282,7 +277,7 @@ DC3DD
 Scalpel
 ```
 
-Dosya analizi, dijital adli bilişim ve steganografi çalışmaları için kullanılır.
+Dosya analizi, metadata inceleme, steganografi ve dijital adli bilişim çalışmaları için kullanılır.
 
 ---
 
@@ -302,7 +297,7 @@ iPerf3
 Masscan
 ```
 
-Ağ analizi ve trafik inceleme çalışmalarında kullanılır.
+Ağ analizi ve trafik inceleme çalışmalarında kullanılabilir.
 
 ---
 
@@ -320,7 +315,7 @@ SecLists
 Wordlists
 ```
 
-Yetkili test ve laboratuvar ortamlarında parola/hash güvenliği analizleri için kullanılır.
+Yetkili güvenlik testleri ve laboratuvar ortamlarında parola/hash güvenliği analizinde kullanılır.
 
 ---
 
@@ -338,21 +333,15 @@ rfkill
 iw
 ```
 
-Kablosuz ağ güvenliği ve analiz çalışmalarında kullanılır.
+Kablosuz ağ analizi ve güvenlik testlerinde kullanılabilir.
 
 ---
 
 # 🟢 GVM / OpenVAS
 
-Kali depolarında mevcut olduğu durumda:
+Kali deposunda `gvm` paketi mevcutsa otomatik olarak kurulmaya çalışılır.
 
-```text
-gvm
-```
-
-kurulur.
-
-İlk yapılandırma için:
+Kurulumdan sonra ilk yapılandırma:
 
 ```bash
 sudo gvm-setup
@@ -374,7 +363,7 @@ sudo gvm-start
 
 # 🛠️ Yardımcı Araçlar
 
-Kurulum sırasında aşağıdaki araçlar da kontrol edilir:
+Kurulumda mevcut olması halinde aşağıdaki araçlar da kontrol edilir:
 
 ```text
 Gedit
@@ -391,7 +380,7 @@ curl
 wget
 unzip
 p7zip
-git
+Git
 GitHub CLI
 eza
 bat
@@ -401,7 +390,7 @@ bat
 
 # 🐉 Kali Metapaketleri
 
-Kali Linux kullanılıyorsa uygun metapaketler ayrıca kontrol edilir.
+Kali Linux üzerinde mevcutsa aşağıdaki metapaketler de kontrol edilir:
 
 ```text
 kali-tools-web
@@ -413,55 +402,71 @@ kali-tools-forensics
 kali-tools-windows-resources
 ```
 
-> `kali-linux-everything` bilinçli olarak kullanılmaz. Sistem gereksiz yere yüzlerce ekstra paketle doldurulmadan, odaklanmış araç grupları tercih edilir.
+`kali-linux-everything` kullanılmaz.
+
+Amaç sistemi gereksiz paketlerle doldurmak yerine belirli güvenlik kategorilerini hazırlamaktır.
 
 ---
 
-# 📦 Paket Yönetimi
+# 🔄 APT Güncellemesi
 
-Script her paket için önce mevcut durumu kontrol eder.
+Paket kurulumu başlamadan önce:
 
-### Zaten kuruluysa
+```bash
+apt-get update
+```
+
+otomatik olarak çalıştırılır.
+
+APT güncellemesi başarısız olursa kurulum güvenli şekilde durdurulur.
+
+---
+
+# 📦 Paket Kontrol Sistemi
+
+Script her paketi kurmadan önce kontrol eder.
+
+### Zaten kurulu
 
 ```text
 [VAR]
 ```
 
-### Depoda yoksa
+### Depoda bulunamadı
 
 ```text
 [YOK]
 ```
 
-### Kuruluyorsa
+### Kuruluyor
 
 ```text
 [KURULUYOR]
 ```
 
-### Başarılıysa
+### Başarılı
 
 ```text
 [ OK ]
 ```
 
-### Kurulum başarısızsa
+### Hata
 
 ```text
 [HATA]
 ```
 
-Bir paketin bulunamaması normalde diğer paketlerin kurulumunu durdurmaz.
+Bir paketin depoda bulunmaması diğer paketlerin kurulmasını normalde engellemez.
 
-Bu özellikle Kali sürümleri arasındaki paket adı farklılıklarında faydalıdır.
+Bu yapı farklı Kali/Debian sürümlerindeki paket farklılıklarının kurulumu tamamen durdurmasını önlemeye yardımcı olur.
 
 ---
 
 # 💾 Otomatik Yedekleme
 
-Türkçeleştirme seçildiğinde sistem yapılandırma dosyalarının yedeği alınır.
+Türkçeleştirme seçildiğinde önemli sistem dosyalarının yedeği alınır.
 
-Yedek dizini:
+Yedek konumu:
 
 ```text
 /root/linux-turkce-backup-YYYYMMDD_HHMMSS/
@@ -481,13 +486,13 @@ Yedeklenebilen dosyalar:
 
 # 📝 Log
 
-Kurulum kayıtları:
+Script çalışma kayıtlarını:
 
 ```text
 /var/log/linux-turkce.log
 ```
 
-dosyasında tutulur.
+dosyasına yazar.
 
 Canlı görüntülemek için:
 
@@ -499,7 +504,7 @@ sudo tail -f /var/log/linux-turkce.log
 
 # ✅ Kurulum Sonrası
 
-Türkçeleştirme tamamlandıktan sonra en iyi sonuç için oturumu kapatıp tekrar açmanız veya sistemi yeniden başlatmanız önerilir:
+Türkçeleştirme işlemlerinin tamamen uygulanması için oturumu kapatıp tekrar açmanız veya sistemi yeniden başlatmanız önerilir.
 
 ```bash
 sudo reboot
@@ -507,21 +512,21 @@ sudo reboot
 
 ---
 
-# 🧪 Scripti Çalıştırmadan Önce Kontrol
+# 🧪 Script Kontrolü
 
-Bash sözdizimini kontrol etmek için:
+Scripti çalıştırmadan önce Bash sözdizimini kontrol edebilirsiniz:
 
 ```bash
 bash -n linux-turkce.sh
 ```
 
-Daha ayrıntılı kontrol için:
+ShellCheck ile daha ayrıntılı kontrol:
 
 ```bash
 shellcheck linux-turkce.sh
 ```
 
-`ShellCheck` yüklü değilse:
+ShellCheck kurulu değilse:
 
 ```bash
 sudo apt install shellcheck
@@ -529,27 +534,9 @@ sudo apt install shellcheck
 
 ---
 
-# ⚠️ Güvenlik ve Yasal Kullanım
-
-Bu repository güvenlik araçlarını otomatik olarak kurabilir.
-
-Kurulan araçlar yalnızca:
-
-* Kendi sistemleriniz
-* Yetkili güvenlik testleri
-* CTF yarışmaları
-* Eğitim laboratuvarları
-* Test/sanal makine ortamları
-
-üzerinde kullanılmalıdır.
-
-Başkasına ait sistemlerde izinsiz tarama, parola saldırısı veya güvenlik testi gerçekleştirmeyin.
-
----
-
 # 🔧 Sorun Giderme
 
-## APT güncelleme hatası
+## APT hatası
 
 Önce:
 
@@ -557,50 +544,38 @@ Başkasına ait sistemlerde izinsiz tarama, parola saldırısı veya güvenlik t
 sudo apt update
 ```
 
-ardından:
+Ardından:
 
 ```bash
 sudo apt --fix-broken install
 ```
 
-çalıştırılabilir.
-
-Sonrasında script tekrar çalıştırılabilir:
+Sonra scripti yeniden çalıştırın:
 
 ```bash
 sudo bash linux-turkce.sh
 ```
 
----
+## Paket bulunamadı
 
-## Türkçe dil hemen görünmüyor
-
-Locale değişikliklerinin uygulanması için:
-
-```bash
-sudo reboot
-```
-
-veya oturumu kapatıp tekrar açın.
-
----
-
-## Bir paket bulunamadı
-
-Bu durum her zaman script hatası değildir.
-
-Paketin mevcut olup olmadığını kontrol etmek için:
+Bir paket mevcut değilse kontrol edin:
 
 ```bash
 apt-cache search paket-adi
 ```
 
-kullanabilirsiniz.
-
 Örneğin:
 
 ```bash
 apt-cache search jadx
+```
+
+## Türkçe hemen uygulanmadı
+
+Sistemi yeniden başlatın:
+
+```bash
+sudo reboot
 ```
 
 ---
@@ -609,7 +584,6 @@ apt-cache search jadx
 
 ```text
 kali_turkcelestirme/
-│
 ├── linux-turkce.sh
 ├── README.md
 └── LICENSE
@@ -617,11 +591,29 @@ kali_turkcelestirme/
 
 ---
 
+# ⚠️ Yasal ve Güvenli Kullanım
+
+Bu proje güvenlik araçlarının kurulumunu kolaylaştırır.
+
+Kurulan araçlar yalnızca:
+
+* Kendi sistemlerinizde
+* Yetkili güvenlik testlerinde
+* CTF ortamlarında
+* Eğitim laboratuvarlarında
+* Sanal makine/test ortamlarında
+
+kullanılmalıdır.
+
+Yetkisiz sistemlerde tarama, parola saldırısı veya başka güvenlik testleri gerçekleştirmeyin.
+
+---
+
 # 🤝 Katkı
 
-Hata bildirimleri, iyileştirmeler ve yeni paket önerileri için GitHub Issues kullanılabilir.
+Hata bildirimleri ve geliştirme önerileri için GitHub Issues kullanılabilir.
 
-Pull Request katkıları memnuniyetle değerlendirilir.
+Pull Request katkıları değerlendirilebilir.
 
 ---
 
@@ -639,19 +631,15 @@ https://github.com/vedattascier/kali_turkcelestirme
 
 MIT License
 
-Bu proje eğitim, laboratuvar, CTF ve yetkili güvenlik testleri amacıyla geliştirilmiştir.
+Bu proje eğitim, CTF, laboratuvar ve yetkili güvenlik testleri amacıyla geliştirilmiştir.
 
 ---
 
 ## ⭐ Destek
 
-Projeyi faydalı bulduysanız GitHub repository'sine ⭐ bırakabilirsiniz.
+Projeyi faydalı bulduysanız repository'ye ⭐ bırakabilirsiniz.
 
-```text
 https://github.com/vedattascier/kali_turkcelestirme
-```
 
 ```
-
-Bu sürüm doğrudan `README.md` içine konulabilecek şekilde düzenlendi.
 ```
