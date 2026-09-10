@@ -1,4 +1,4 @@
-```text
+
 #!/usr/bin/env bash
 
 set -u
@@ -1274,5 +1274,4 @@ main() {
     show_summary
 }
 
-main "$@"
-```
+main "$@
