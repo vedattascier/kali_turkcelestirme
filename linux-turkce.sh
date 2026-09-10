@@ -1274,4 +1274,4 @@ main() {
     show_summary
 }
 
-main "$@
+main "$@"
