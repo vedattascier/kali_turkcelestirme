@@ -2,21 +2,14 @@
 #
 # Linux Türkçe + Pentest Kurulum Yöneticisi
 # Kali Linux / Debian / Ubuntu
-# Sürüm: 2026.30
+# Sürüm: 2026.31
 #
 # Özellikler:
 # - Yalnızca 2 soru sorar
 # - Kali 2026.x kali.sources desteği
 # - APT/dpkg durumunu güvenli biçimde toparlar
-# - Bozuk rkhunter / kali-tools-forensics durumunu hedefli düzeltir
-# - APT paket indekslerini Candidate üzerinden doğrular
 # - Türkçe locale + Türkçe Q klavye
-# - Firefox / Chromium / LibreOffice / manpages / font desteği
-# - Geniş pentest araç seti; mevcut APT paketlerini tek tek veya gruplar halinde kurar
-# - Bulunmayan paketleri atlar ve devam eder
-# - Üçüncü taraf repo, rastgele curl|bash, rastgele pip kurulumu yapmaz
-# - Ayrıntılı log + yedek
-#
+# - Geniş pentest araç seti (Benzersizleştirilmiş)
 
 VERSION="2026.31"
 LOG_FILE="/var/log/linux-turkce.log"
@@ -65,7 +58,6 @@ err()  { log "HATA" "$*" >&2; }
 ensure_root() {
     if [[ ${EUID:-999} -ne 0 ]]; then
         err "Script root olarak çalıştırılmalı."
-        err "Örnek: curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh | sudo bash"
         exit 1
     fi
 }
@@ -235,9 +227,6 @@ repair_dpkg() {
     rkh_status="$(dpkg_state rkhunter)"
     forensic_status="$(dpkg_state kali-tools-forensics)"
 
-    # rkhunter postinst bozulduğunda onu tutan Kali forensic metapackage'i
-    # kaldırılır. Bu, metapackage'in kendisini kaldırır; kurulu araçların hepsini
-    # otomatik olarak silme amacı taşımaz.
     if [[ "$rkh_status" == *"half-configured" ||
           "$rkh_status" == *"half-installed" ||
           "$rkh_status" == *"reinstreq" ]]; then
@@ -343,8 +332,6 @@ apt_index_is_healthy() {
         fi
     done
 
-    # Hepsi her Debian/Kali türevinde bulunmak zorunda değil; en az iki aday
-    # yeterlidir. bash + nmap genelde güvenilir temel testtir.
     ((count >= 2))
 }
 
@@ -378,7 +365,6 @@ refresh_apt_indexes() {
 
     if ! apt_indexes_present || ! apt_index_is_healthy; then
         err "APT update tamamlandı ancak paket Candidate bilgileri üretilemiyor."
-        err "APT kaynağı: /etc/apt/sources.list.d/kali.sources"
         return 1
     fi
 
@@ -394,7 +380,6 @@ apt_update() {
     fi
 
     repair_dpkg || warn "dpkg tam temizlenemedi; APT yine de doğrulanacak."
-
     refresh_apt_indexes || return 1
 
     dpkg --configure -a >>"$LOG_FILE" 2>&1 || true
@@ -484,7 +469,6 @@ install_group() {
     fi
 
     warn "$title toplu kurulumu başarısız; paketler tek tek deneniyor."
-
     apt-get -f install -y >>"$LOG_FILE" 2>&1 || true
     dpkg --configure -a >>"$LOG_FILE" 2>&1 || true
 
@@ -550,6 +534,8 @@ KEYBOARD
             'keyboard-configuration keyboard-configuration/variant string' \
             'keyboard-configuration keyboard-configuration/options string' \
             | debconf-set-selections 2>/dev/null || true
+        # Apply the changes to debconf immediately
+        dpkg-reconfigure -f noninteractive keyboard-configuration >>"$LOG_FILE" 2>&1 || true
     fi
 
     if command -v localectl >/dev/null 2>&1; then
@@ -597,7 +583,7 @@ build_tool_lists() {
         net-tools iproute2 traceroute iperf3 socat
         netcat-openbsd netcat-traditional
         samba smbclient cifs-utils ldap-utils
-        xclip xsel
+        xclip xsel proxychains4 rlwrap expect sshpass
     )
 
     INFORMATION_TOOLS=(
@@ -606,8 +592,7 @@ build_tool_lists() {
         sherlock subfinder amass assetfinder
         dnsenum dnsrecon fierce dnsmap dnswalk
         whois whatweb wafw00f httpx-toolkit
-        sn0int eyewitness gowitness
-        aquatone
+        sn0int eyewitness gowitness aquatone
     )
 
     WEB_TOOLS=(
@@ -616,24 +601,20 @@ build_tool_lists() {
         burpsuite zaproxy mitmproxy
         wpscan joomscan droopescan
         arjun paramspider
-        testssl.sh sslscan sslyze
-        corscanner
+        testssl.sh sslscan sslyze corscanner
     )
 
     EXPLOIT_TOOLS=(
-        metasploit-framework exploitdb searchsploit
+        metasploit-framework exploitdb
         exploitdb-bin-sploits msfpc set
-        beef-xss gophish
-        commix routersploit
-        searchsploit
+        beef-xss gophish routersploit
         shellnoob termineter
     )
 
     PASSWORD_TOOLS=(
         hashcat hashcat-utils john johnny
         hydra hydra-gtk medusa patator
-        ncrack crowbar
-        crunch cewl
+        ncrack crowbar crunch cewl
         hashid hash-identifier
         ophcrack ophcrack-cli
         fcrackzip pdfcrack
@@ -645,11 +626,8 @@ build_tool_lists() {
         aircrack-ng reaver bully wifite
         kismet fern-wifi-cracker fluxion
         hcxdumptool hcxtools hcxpcapngtool
-        pixiewps
-        rfkill iw wireless-tools
-        hostapd hostapd-wpe
-        macchanger
-        bettercap
+        pixiewps rfkill iw wireless-tools
+        hostapd hostapd-wpe macchanger
     )
 
     NETWORK_TOOLS=(
@@ -657,40 +635,28 @@ build_tool_lists() {
         ettercap-graphical ettercap-common
         bettercap dsniff
         tcpflow tcpreplay netsniff-ng
-        sniffglue
-        responder mitmproxy socat
-        ssldump
+        sniffglue ssldump
     )
 
     AD_WINDOWS_TOOLS=(
         evil-winrm enum4linux enum4linux-ng
         impacket-scripts python3-impacket
-        netexec responder bloodyad
-        samba smbclient cifs-utils ldap-utils
-        crackmapexec
-        ldapsearch-ad
-        kerbrute
-        certipy-ad
-        bloodhound bloodhound.py
-        mitm6
+        netexec responder bloodyad crackmapexec
+        ldapsearch-ad kerbrute certipy-ad
+        bloodhound bloodhound.py mitm6
     )
 
     REVERSE_TOOLS=(
         ghidra ghidra-data
-        jadx rizin radare2 rizin-cutter rz-ghidra
-        cutter
+        jadx rizin radare2 rizin-cutter rz-ghidra cutter
         apktool dex2jar bytecode-viewer jd-gui
-        jadx
         ropper ropgadget pwntools
         edb-debugger gdb gdb-multiarch
         binwalk binwalk3
-        yara yara-python
-        capa
+        yara yara-python capa
         strace ltrace binutils nasm
         objdump patchelf checksec
-        file binwalk
-        osslsigncode
-        upx-ucl
+        file osslsigncode upx-ucl
     )
 
     FORENSIC_TOOLS=(
@@ -702,130 +668,57 @@ build_tool_lists() {
         ewf-tools afflib-tools
         guymager gpart gparted
         ext4magic extundelete recoverjpeg recoverdm
-        magicrescue photorec
-        scalpel safecopy ddrescue
+        magicrescue photorec safecopy ddrescue
         forensic-artifacts forensics-colorize
-        volatility3 volatility
-        plaso
+        volatility3 volatility plaso
         rifiuti2 rifiuti
-        reglookup regripper
-        sqlitebrowser
-        binwalk binwalk3
-        exiv2
-        cabextract
+        reglookup regripper sqlitebrowser
+        exiv2 cabextract
     )
 
     MOBILE_TOOLS=(
-        adb fastboot
-        scrcpy
-        apktool jadx dex2jar
+        adb fastboot scrcpy
         android-sdk-platform-tools
-        frida-tools
-        objection
-        apkid
-        qemu-user-static
+        frida-tools objection apkid qemu-user-static
     )
 
     SNIFF_SPOOF_TOOLS=(
-        ettercap-graphical ettercap-common
-        bettercap dsniff macchanger responder
-        mitmproxy wireshark tshark tcpdump
-        arpspoof
-        sslstrip
-        dnschef
+        arpspoof sslstrip dnschef
     )
 
     POST_EXPLOIT_TOOLS=(
-        proxychains4 chisel ligolo-ng
-        rlwrap pwncat
-        socat netcat-openbsd
-        bloodhound bloodhound.py
-        evil-winrm
-        mimikatz
+        chisel ligolo-ng pwncat mimikatz
     )
 
     CLOUD_CONTAINER_TOOLS=(
-        trivy
-        prowler
-        kube-hunter
-        kubeaudit
-        docker.io
-        docker-compose
-        podman
-        skopeo
-    )
-
-    SOCIAL_TOOLS=(
-        set
-        gophish
-        maltego
-        beef-xss
+        trivy prowler kube-hunter kubeaudit
+        docker.io docker-compose podman skopeo
     )
 
     REPORTING_TOOLS=(
-        dradis
-        faraday
-        cherrytree
-        cutycapt
+        dradis faraday cherrytree cutycapt
     )
 
     PRIVESC_TOOLS=(
-        linux-exploit-suggester
-        linpeas
-        pspy
-        peass
-        unix-privesc-check
-        linux-smart-enumeration
+        linux-exploit-suggester linpeas pspy peass
+        unix-privesc-check linux-smart-enumeration
     )
 
     VULN_TOOLS=(
-        gvm
-        lynis
-        nuclei
-        testssl.sh
-        sslscan
-        sslyze
+        gvm lynis
     )
 
     MALWARE_ANALYSIS_TOOLS=(
-        yara
-        capa
         clamav clamav-daemon
-        yara-python
-        binwalk binwalk3
-        ghidra
-        radare2
-        rizin
-        strace ltrace
-        gdb
     )
 
     RF_TOOLS=(
-        rtl-sdr
-        gqrx-sdr
-        inspectrum
-        gr-osmosdr
-        hackrf
-        hackrf-tools
-        sdrangel
+        rtl-sdr gqrx-sdr inspectrum gr-osmosdr
+        hackrf hackrf-tools sdrangel
     )
 
-    UTILITY_TOOLS=(
-        fzf ripgrep jq yq
-        tmux screen btop
-        proxychains4
-        rlwrap
-        expect
-        sshpass
-        rsync
-    )
-
-    # Üçüncü taraf repository gerektiren araçlar özellikle otomatik eklenmez.
-    # Mevcut APT kaynağında paket olarak varsa bunlar da kurulabilir.
     OPTIONAL_TOOLS=(
-        arsenal-ng arsenal
-        jwt-tool
-        sublime-text
+        arsenal-ng arsenal jwt-tool sublime-text
     )
 }
 
@@ -846,13 +739,11 @@ install_pentest_stack() {
     install_group "Sniffing / Spoofing / MITM" "${SNIFF_SPOOF_TOOLS[@]}"
     install_group "Post-Exploitation" "${POST_EXPLOIT_TOOLS[@]}"
     install_group "Cloud / Container" "${CLOUD_CONTAINER_TOOLS[@]}"
-    install_group "Social Engineering" "${SOCIAL_TOOLS[@]}"
     install_group "Reporting" "${REPORTING_TOOLS[@]}"
     install_group "Privilege Escalation" "${PRIVESC_TOOLS[@]}"
     install_group "Vulnerability Management" "${VULN_TOOLS[@]}"
     install_group "Malware Analysis" "${MALWARE_ANALYSIS_TOOLS[@]}"
     install_group "RF / SDR" "${RF_TOOLS[@]}"
-    install_group "Yardımcı Araçlar" "${UTILITY_TOOLS[@]}"
     install_group "Özel / APT'te varsa" "${OPTIONAL_TOOLS[@]}"
 }
 
@@ -941,8 +832,6 @@ ask_yes_no() {
     local prompt="$1"
     local answer
 
-    # curl ... | sudo bash kullanımında stdin pipe'a bağlıdır.
-    # Bu nedenle soruları doğrudan terminalden (/dev/tty) alıyoruz.
     if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
         err "İnteraktif terminal (/dev/tty) bulunamadı."
         err "Soruların cevaplanabilmesi için bir terminal gerekiyor."
@@ -957,7 +846,6 @@ ask_yes_no() {
             return 2
         fi
 
-        # Boş cevap = E
         answer="${answer:-E}"
 
         case "$answer" in
@@ -990,7 +878,6 @@ main() {
     local do_turkish=0
     local do_pentest=0
 
-    # Kullanıcıdan sadece iki soru alınır.
     ask_yes_no 'Linux Türkçe yapılsın mı? [E/h]: '
     case $? in
         0) do_turkish=1 ;;
