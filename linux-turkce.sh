@@ -1,1277 +1,1157 @@
-
 #!/usr/bin/env bash
+#
+# Linux Türkçe + Pentest Kurulum Yöneticisi
+# Kali Linux / Debian / Ubuntu
+# Sürüm: 2026.20
+#
 
-set -u
-set -o pipefail
-
-VERSION="2026.10"
+VERSION="2026.20"
 LOG_FILE="/var/log/linux-turkce.log"
+BACKUP_DIR="/var/backups/linux-turkce"
+TMP_DIR="/tmp/linux-turkce.$$"
+APT_TIMEOUT="180"
 
-# ============================================================
-# RENKLER
-# ============================================================
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
-if [[ -t 1 ]]; then
-    RED=$'\033[0;31m'
-    GREEN=$'\033[0;32m'
-    YELLOW=$'\033[1;33m'
-    BLUE=$'\033[0;34m'
-    CYAN=$'\033[0;36m'
-    MAGENTA=$'\033[0;35m'
-    WHITE=$'\033[1;37m'
-    GRAY=$'\033[0;90m'
-    NC=$'\033[0m'
-else
-    RED=""
-    GREEN=""
-    YELLOW=""
-    BLUE=""
-    CYAN=""
-    MAGENTA=""
-    WHITE=""
-    GRAY=""
-    NC=""
-fi
+mkdir -p "$TMP_DIR" 2>/dev/null || true
 
-# ============================================================
-# GLOBAL
-# ============================================================
-
-OS_NAME="Bilinmiyor"
-OS_ID="unknown"
-OS_VERSION="unknown"
-OS_LIKE=""
-
-TARGET_USER="root"
-TARGET_HOME="/root"
-DESKTOP="Bilinmiyor"
-
-DO_TURKISH=0
-DO_PENTEST=0
-
-BACKUP_DIR=""
-
-TOTAL_REQUESTED=0
-TOTAL_AVAILABLE=0
-TOTAL_INSTALLED=0
-TOTAL_ALREADY=0
-TOTAL_MISSING=0
-TOTAL_FAILED=0
-
-# ============================================================
-# LOG
-# ============================================================
-
-init_log() {
-    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-    touch "$LOG_FILE" 2>/dev/null || true
+cleanup() {
+    rm -rf "$TMP_DIR" 2>/dev/null || true
 }
+trap cleanup EXIT INT TERM
 
 log() {
-    printf '[%s] %s\n' \
-        "$(date '+%Y-%m-%d %H:%M:%S')" \
-        "$*" >> "$LOG_FILE" 2>/dev/null || true
+    local msg="$*"
+    printf '[%s] %s\n' "$(date '+%F %T')" "$msg" | tee -a "$LOG_FILE"
 }
 
-info() {
-    printf '%b[INFO]%b %s\n' "$CYAN" "$NC" "$*"
-    log "INFO: $*"
-}
+info() { log "[BİLGİ] $*"; }
+ok()   { log "[ OK ] $*"; }
+warn() { log "[UYARI] $*" >&2; }
+err()  { log "[HATA] $*" >&2; }
 
-success() {
-    printf '%b[ OK ]%b %s\n' "$GREEN" "$NC" "$*"
-    log "OK: $*"
-}
-
-warning() {
-    printf '%b[UYARI]%b %s\n' "$YELLOW" "$NC" "$*"
-    log "UYARI: $*"
-}
-
-error_msg() {
-    printf '%b[HATA]%b %s\n' "$RED" "$NC" "$*"
-    log "HATA: $*"
-}
-
-# ============================================================
-# ROOT
-# ============================================================
-
-check_root() {
-    if [[ "${EUID:-999}" -ne 0 ]]; then
-        error_msg "Bu script root yetkisiyle çalıştırılmalıdır."
-        printf '\n'
-        printf 'Kullanım:\n'
-        printf '  sudo bash linux-turkce.sh\n'
-        printf '\n'
+ensure_root() {
+    if [[ ${EUID:-999} -ne 0 ]]; then
+        err "Bu script root olarak çalıştırılmalı."
+        err "Örnek: sudo bash linux-turkce.sh"
         exit 1
     fi
 }
 
-# ============================================================
-# SİSTEM BİLGİSİ
-# ============================================================
+prepare_log() {
+    touch "$LOG_FILE" 2>/dev/null || {
+        LOG_FILE="/tmp/linux-turkce.log"
+        touch "$LOG_FILE" 2>/dev/null || true
+    }
 
-load_system_info() {
+    chmod 600 "$LOG_FILE" 2>/dev/null || true
+}
 
-    if [[ ! -r /etc/os-release ]]; then
-        error_msg "/etc/os-release bulunamadı."
-        exit 1
-    fi
+backup_file() {
+    local f="$1"
 
-    # shellcheck disable=SC1091
-    source /etc/os-release
+    [[ -e "$f" ]] || return 0
 
-    OS_NAME="${PRETTY_NAME:-${NAME:-Bilinmeyen Linux}}"
-    OS_ID="${ID:-unknown}"
-    OS_VERSION="${VERSION_ID:-unknown}"
-    OS_LIKE="${ID_LIKE:-}"
+    mkdir -p "$BACKUP_DIR" 2>/dev/null || return 0
 
-    if ! command -v apt-get >/dev/null 2>&1; then
-        error_msg "apt-get bulunamadı."
-        error_msg "Debian/Kali/Ubuntu tabanlı sistem gereklidir."
-        exit 1
+    cp -a "$f" \
+        "$BACKUP_DIR/$(basename "$f").$(date +%Y%m%d-%H%M%S).bak" \
+        2>/dev/null || true
+}
+
+backup_apt_config() {
+    mkdir -p "$BACKUP_DIR/apt" 2>/dev/null || true
+
+    backup_file /etc/apt/sources.list
+    backup_file /etc/apt/sources.list.d/kali.sources
+
+    if [[ -d /etc/apt/sources.list.d ]]; then
+        cp -a /etc/apt/sources.list.d \
+            "$BACKUP_DIR/apt/sources.list.d.$(date +%Y%m%d-%H%M%S).bak" \
+            2>/dev/null || true
     fi
 }
 
-# ============================================================
-# KULLANICI TESPİTİ
-# ============================================================
-
-detect_target_user() {
-
-    TARGET_USER=""
-
-    if [[ -n "${SUDO_USER:-}" ]] &&
-       [[ "${SUDO_USER:-}" != "root" ]] &&
-       id "${SUDO_USER:-}" >/dev/null 2>&1; then
-
-        TARGET_USER="$SUDO_USER"
-
-    elif [[ -n "${USER:-}" ]] &&
-         [[ "${USER:-}" != "root" ]] &&
-         id "${USER:-}" >/dev/null 2>&1; then
-
-        TARGET_USER="$USER"
-
-    else
-
-        TARGET_USER="$(
-            awk -F: '
-                $3 >= 1000 &&
-                $3 < 60000 &&
-                $1 != "nobody" {
-                    print $1
-                    exit
-                }
-            ' /etc/passwd
-        )"
-    fi
-
-    [[ -n "$TARGET_USER" ]] || TARGET_USER="root"
-
-    TARGET_HOME="$(
-        getent passwd "$TARGET_USER" 2>/dev/null |
-        cut -d: -f6
-    )"
-
-    [[ -n "$TARGET_HOME" ]] || TARGET_HOME="/root"
+is_kali() {
+    grep -qiE '^ID=kali$|^NAME="?Kali Linux"?' \
+        /etc/os-release 2>/dev/null
 }
 
-# ============================================================
-# MASAÜSTÜ
-# ============================================================
-
-detect_desktop() {
-
-    DESKTOP="Bilinmiyor"
-
-    if pgrep -u "$TARGET_USER" -x xfce4-session >/dev/null 2>&1 ||
-       pgrep -u "$TARGET_USER" -x xfdesktop >/dev/null 2>&1; then
-
-        DESKTOP="XFCE"
-
-    elif pgrep -u "$TARGET_USER" -x gnome-session >/dev/null 2>&1 ||
-         pgrep -u "$TARGET_USER" -x gnome-shell >/dev/null 2>&1; then
-
-        DESKTOP="GNOME"
-
-    elif pgrep -u "$TARGET_USER" -x plasmashell >/dev/null 2>&1; then
-
-        DESKTOP="KDE Plasma"
-
-    elif pgrep -u "$TARGET_USER" -x cinnamon-session >/dev/null 2>&1; then
-
-        DESKTOP="Cinnamon"
-
-    elif pgrep -u "$TARGET_USER" -x mate-session >/dev/null 2>&1; then
-
-        DESKTOP="MATE"
-
-    elif [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
-
-        DESKTOP="$XDG_CURRENT_DESKTOP"
-
-    elif [[ -n "${DESKTOP_SESSION:-}" ]]; then
-
-        DESKTOP="$DESKTOP_SESSION"
-    fi
+is_debian_family() {
+    grep -qiE '^ID=(debian|ubuntu|kali)$' \
+        /etc/os-release 2>/dev/null
 }
 
-# ============================================================
-# TTY OKUMA
-# ============================================================
+wait_for_apt_lock() {
+    local max_wait=180
+    local waited=0
 
-read_tty() {
+    local locks=(
+        /var/lib/dpkg/lock-frontend
+        /var/lib/dpkg/lock
+        /var/cache/apt/archives/lock
+        /var/lib/apt/lists/lock
+    )
 
-    local variable="$1"
-    local prompt="$2"
-    local value=""
+    info "APT/dpkg kilitleri kontrol ediliyor..."
 
-    if [[ -r /dev/tty ]]; then
+    while :; do
+        local busy=0
+        local f
 
-        printf '%s' "$prompt" > /dev/tty
+        for f in "${locks[@]}"; do
+            if command -v fuser >/dev/null 2>&1; then
+                if fuser "$f" >/dev/null 2>&1; then
+                    busy=1
+                    break
+                fi
+            fi
+        done
 
-        if ! IFS= read -r value < /dev/tty; then
+        if ((busy == 0)); then
+            ok "APT/dpkg kilidi boş."
+            return 0
+        fi
+
+        if ((waited >= max_wait)); then
+            warn "APT/dpkg kilidi $max_wait saniye içinde boşalmadı."
             return 1
         fi
 
-    elif [[ -t 0 ]]; then
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
 
-        printf '%s' "$prompt"
+dpkg_state() {
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null || true
+}
 
-        if ! IFS= read -r value; then
-            return 1
+package_installed() {
+    [[ "$(dpkg_state "$1")" == "install ok installed" ]]
+}
+
+package_available() {
+    local pkg="$1"
+
+    apt-cache show "$pkg" >/dev/null 2>&1
+}
+
+remove_dpkg_package() {
+    local pkg="$1"
+
+    if [[ -z "$(dpkg_state "$pkg")" ]]; then
+        return 0
+    fi
+
+    info "$pkg kaldırılıyor..."
+
+    dpkg \
+        --remove \
+        --force-depends \
+        --force-remove-reinstreq \
+        "$pkg" \
+        >>"$LOG_FILE" 2>&1 || true
+}
+
+repair_dpkg() {
+    info "dpkg/bağımlılık durumu kontrol ediliyor..."
+
+    local rkh_status
+    rkh_status="$(dpkg_state rkhunter)"
+
+    #
+    # Özel kurtarma:
+    #
+    # kali-tools-forensics -> rkhunter
+    #
+    # rkhunter postinst bozulduğunda metapackage dpkg'nin
+    # toparlanmasını engelleyebilir. Metapackage kaldırılır,
+    # bağımsız adli araçlar silinmez.
+    #
+
+    if [[ "$rkh_status" == *"half-configured"* ||
+          "$rkh_status" == *"half-installed"* ||
+          "$rkh_status" == *"reinstreq"* ]]; then
+
+        warn "Bozuk rkhunter durumu tespit edildi:"
+        warn "$rkh_status"
+
+        local forensic_status
+        forensic_status="$(dpkg_state kali-tools-forensics)"
+
+        if [[ "$forensic_status" == *"install ok"* ||
+              "$forensic_status" == *"half-configured"* ||
+              "$forensic_status" == *"half-installed"* ||
+              "$forensic_status" == *"reinstreq"* ]]; then
+
+            warn "kali-tools-forensics metapackage'i kaldırılıyor..."
+
+            dpkg \
+                --remove \
+                --force-depends \
+                --force-remove-reinstreq \
+                kali-tools-forensics \
+                >>"$LOG_FILE" 2>&1 || true
         fi
 
-    else
+        warn "Bozuk rkhunter paketi kaldırılıyor..."
 
+        dpkg \
+            --remove \
+            --force-depends \
+            --force-remove-reinstreq \
+            rkhunter \
+            >>"$LOG_FILE" 2>&1 || true
+    fi
+
+    #
+    # İlk normal dpkg toparlama
+    #
+
+    if ! dpkg --configure -a >>"$LOG_FILE" 2>&1; then
+        warn "dpkg --configure -a ilk denemede başarısız."
+    fi
+
+    #
+    # Bağımlılık onarımı
+    #
+
+    if ! apt-get -f install -y >>"$LOG_FILE" 2>&1; then
+        warn "apt-get -f install başarısız oldu."
+    fi
+
+    #
+    # İkinci dpkg toparlama
+    #
+
+    if ! dpkg --configure -a >>"$LOG_FILE" 2>&1; then
+        warn "dpkg --configure -a ikinci denemede de başarısız."
+        dpkg --audit >>"$LOG_FILE" 2>&1 || true
+    fi
+
+    #
+    # Son bağımlılık onarımı
+    #
+
+    if apt-get -f install -y >>"$LOG_FILE" 2>&1; then
+        if dpkg --configure -a >>"$LOG_FILE" 2>&1; then
+            ok "dpkg/bağımlılık onarımı tamamlandı."
+            return 0
+        fi
+    fi
+
+    warn "APT/dpkg tamamen temizlenemedi."
+    dpkg --audit >>"$LOG_FILE" 2>&1 || true
+
+    return 1
+}
+
+ensure_kali_sources() {
+    is_kali || return 0
+
+    local keyring="/usr/share/keyrings/kali-archive-keyring.gpg"
+    local source_file="/etc/apt/sources.list.d/kali.sources"
+
+    local expected
+    expected=$'Types: deb\nURIs: http://http.kali.org/kali/\nSuites: kali-rolling\nComponents: main contrib non-free non-free-firmware\nSigned-By: /usr/share/keyrings/kali-archive-keyring.gpg\n'
+
+    mkdir -p /etc/apt/sources.list.d
+
+    #
+    # Keyring yoksa güvenlik açısından rastgele indirme yapılmaz.
+    #
+
+    if [[ ! -f "$keyring" ]]; then
+        err "Kali archive keyring bulunamadı:"
+        err "$keyring"
+        err "APT kaynağı güvenli şekilde otomatik düzeltilemiyor."
         return 1
     fi
 
-    value="${value//$'\r'/}"
+    #
+    # kali.sources yoksa oluştur
+    #
 
-    printf -v "$variable" '%s' "$value"
+    if [[ ! -f "$source_file" ]]; then
+        info "Kali APT kaynağı oluşturuluyor..."
+        backup_apt_config
+        printf '%s' "$expected" > "$source_file"
+    else
+
+        #
+        # Mevcut dosya hatalıysa yedekle ve düzelt
+        #
+
+        if ! grep -q \
+            '^URIs:[[:space:]]*http://http\.kali\.org/kali/?[[:space:]]*$' \
+            "$source_file" || \
+           ! grep -q \
+            '^Suites:[[:space:]]*kali-rolling[[:space:]]*$' \
+            "$source_file" || \
+           ! grep -q \
+            '^Components:[[:space:]]*main contrib non-free non-free-firmware[[:space:]]*$' \
+            "$source_file" || \
+           ! grep -q \
+            '^Signed-By:[[:space:]]*/usr/share/keyrings/kali-archive-keyring\.gpg[[:space:]]*$' \
+            "$source_file"; then
+
+            warn "kali.sources hatalı görünüyor."
+            warn "Yedek alınıp standart Kali rolling kaynağı yazılıyor."
+
+            backup_apt_config
+
+            printf '%s' "$expected" > "$source_file"
+        fi
+    fi
+
+    #
+    # Eski sources.list içindeki aynı Kali kaynağını kaldır.
+    # Kullanıcının diğer kaynaklarına dokunulmaz.
+    #
+
+    if [[ -f /etc/apt/sources.list ]]; then
+        sed -i \
+            '/^[[:space:]]*deb[[:space:]]\+http:\/\/http\.kali\.org\/kali[[:space:]]\+kali-rolling[[:space:]]/d' \
+            /etc/apt/sources.list \
+            2>/dev/null || true
+    fi
+
+    ok "Kali APT kaynağı doğrulandı."
+}
+
+apt_update() {
+    wait_for_apt_lock || return 1
+
+    if is_kali; then
+        ensure_kali_sources || return 1
+    fi
+
+    #
+    # Önce bozuk dpkg durumunu düzelt
+    #
+
+    if ! repair_dpkg; then
+        warn "dpkg tamamen toparlanamadı."
+        warn "Yine de APT update deneniyor."
+    fi
+
+    info "APT paket listeleri güncelleniyor..."
+
+    if timeout "$APT_TIMEOUT" apt-get update; then
+        ok "APT update başarılı."
+        return 0
+    fi
+
+    #
+    # İkinci deneme
+    #
+
+    warn "APT update ilk denemede başarısız."
+
+    if is_kali; then
+        ensure_kali_sources || return 1
+    fi
+
+    timeout "$APT_TIMEOUT" apt-get update
+}
+
+safe_apt_install() {
+    local pkg="$1"
+    shift
+
+    local extra=("$@")
+
+    if package_installed "$pkg"; then
+        ok "$pkg zaten kurulu."
+        return 0
+    fi
+
+    if ! package_available "$pkg"; then
+        warn "$pkg APT kaynaklarında bulunamadı; atlanıyor."
+        SKIPPED+=("$pkg")
+        return 0
+    fi
+
+    info "$pkg kuruluyor..."
+
+    #
+    # İlk deneme loga
+    #
+
+    if apt-get install \
+        -y \
+        "${extra[@]}" \
+        "$pkg" \
+        >>"$LOG_FILE" 2>&1; then
+
+        ok "$pkg kuruldu."
+        INSTALLED+=("$pkg")
+        return 0
+    fi
+
+    #
+    # Tekil kurtarma denemesi
+    #
+
+    warn "$pkg grup kurulumunda başarısız."
+    warn "Tekil kurtarma kurulumu deneniyor..."
+
+    if apt-get install \
+        -y \
+        "${extra[@]}" \
+        "$pkg"; then
+
+        ok "$pkg kuruldu (kurtarma denemesi)."
+        INSTALLED+=("$pkg")
+        return 0
+    fi
+
+    warn "$pkg kurulamadı; devam ediliyor."
+    FAILED+=("$pkg")
+
+    #
+    # Paket yüzünden dpkg bozulmuşsa hemen toparlamayı dene
+    #
+
+    apt-get -f install -y >>"$LOG_FILE" 2>&1 || true
+    dpkg --configure -a >>"$LOG_FILE" 2>&1 || true
 
     return 0
 }
 
-ask_yes_no() {
+install_group() {
+    local group_name="$1"
+    shift
 
-    local question="$1"
-    local answer=""
+    info "============================================================"
+    info "$group_name"
+    info "============================================================"
 
-    while true; do
+    local valid=()
+    local pkg
 
-        if ! read_tty answer "$question [E/h]: "; then
-            return 1
-        fi
+    #
+    # Ön filtre
+    #
 
-        case "${answer,,}" in
+    for pkg in "$@"; do
 
-            e|evet|y|yes)
-                return 0
-                ;;
-
-            h|hayir|hayır|n|no|"")
-                return 1
-                ;;
-
-            *)
-                warning "Lütfen E veya H girin."
-                ;;
-        esac
-    done
-}
-
-# ============================================================
-# KALI APT KAYNAĞI
-# ============================================================
-
-ensure_kali_sources() {
-
-    [[ "$OS_ID" == "kali" ]] || return 0
-
-    local source_file="/etc/apt/sources.list.d/kali.sources"
-    local keyring="/usr/share/keyrings/kali-archive-keyring.gpg"
-
-    mkdir -p /etc/apt/sources.list.d
-
-    # --------------------------------------------------------
-    # Modern kali.sources zaten doğruysa hiçbir şeyi değiştirme
-    # --------------------------------------------------------
-
-    if [[ -f "$source_file" ]] &&
-       grep -Eq '^[[:space:]]*Types:[[:space:]]*deb([[:space:]]|$)' "$source_file" &&
-       grep -Eq '^[[:space:]]*URIs:[[:space:]]*https?://http\.kali\.org/kali/?' "$source_file" &&
-       grep -Eq '^[[:space:]]*Suites:[[:space:]]*kali-' "$source_file"; then
-
-        success "Kali APT kaynağı hazır."
-        return 0
-    fi
-
-    # --------------------------------------------------------
-    # Eski sources.list varsa önce modernize etmeyi dene
-    # --------------------------------------------------------
-
-    if [[ -f /etc/apt/sources.list ]] &&
-       grep -Eq '^[[:space:]]*deb[[:space:]]+https?://http\.kali\.org/kali[[:space:]]+kali-' \
-       /etc/apt/sources.list 2>/dev/null; then
-
-        if command -v apt-modernize-sources >/dev/null 2>&1; then
-
-            apt-modernize-sources >/dev/null 2>&1 || true
-
-        elif apt modernize-sources --help >/dev/null 2>&1; then
-
-            apt modernize-sources >/dev/null 2>&1 || true
-        fi
-
-        if [[ -f "$source_file" ]]; then
-
-            success "Kali APT kaynağı modernize edildi."
-            return 0
-        fi
-    fi
-
-    # --------------------------------------------------------
-    # Keyring kontrolü
-    # --------------------------------------------------------
-
-    if [[ ! -f "$keyring" ]]; then
-
-        error_msg "Kali archive keyring bulunamadı:"
-        error_msg "$keyring"
-        error_msg "Kali kurulumunuz eksik olabilir."
-
-        return 1
-    fi
-
-    # --------------------------------------------------------
-    # Eski dosyaların yedeği
-    # --------------------------------------------------------
-
-    local backup_dir
-    backup_dir="/root/kali-apt-backup-$(date '+%Y%m%d_%H%M%S')"
-
-    mkdir -p "$backup_dir" 2>/dev/null || true
-
-    if [[ -f "$source_file" ]]; then
-        cp -a "$source_file" "$backup_dir/" 2>/dev/null || true
-    fi
-
-    if [[ -f /etc/apt/sources.list ]]; then
-        cp -a /etc/apt/sources.list "$backup_dir/" 2>/dev/null || true
-    fi
-
-    # --------------------------------------------------------
-    # Resmi Kali kaynağı
-    # --------------------------------------------------------
-
-    cat > "$source_file" <<'EOF'
-# Kali Linux official network repository
-# https://www.kali.org/docs/general-use/kali-apt-sources/
-
-Types: deb
-URIs: http://http.kali.org/kali/
-Suites: kali-rolling
-Components: main contrib non-free non-free-firmware
-Signed-By: /usr/share/keyrings/kali-archive-keyring.gpg
-EOF
-
-    chmod 644 "$source_file"
-
-    success "Kali APT kaynağı oluşturuldu."
-}
-
-# ============================================================
-# APT KİLİT
-# ============================================================
-
-wait_for_apt_lock() {
-
-    local waited=0
-    local max_wait=120
-
-    while true; do
-
-        if ! fuser \
-            /var/lib/dpkg/lock-frontend \
-            /var/lib/dpkg/lock \
-            /var/lib/apt/lists/lock \
-            >/dev/null 2>&1; then
-
-            return 0
-        fi
-
-        if (( waited >= max_wait )); then
-
-            error_msg "APT kilidi $max_wait saniye içinde açılmadı."
-            return 1
-        fi
-
-        printf '\r%bAPT başka bir işlem tarafından kullanılıyor... %3ds%b' \
-            "$YELLOW" "$waited" "$NC"
-
-        sleep 1
-        ((waited++))
-    done
-}
-
-# ============================================================
-# BOZUK DPKG KONTROLÜ
-# ============================================================
-
-repair_dpkg() {
-
-    info "Paket yöneticisi kontrol ediliyor..."
-
-    if dpkg --configure -a >/dev/null 2>&1; then
-
-        success "dpkg hazır."
-        return 0
-    fi
-
-    warning "dpkg içinde yarım kalmış paket yapılandırması bulundu."
-
-    # --------------------------------------------------------
-    # Özellikle bozuk rkhunter yapılandırmasını kontrol et.
-    # rkhunter'ın postinst hatası nedeniyle bütün dpkg zinciri
-    # kilitlenebiliyor.
-    # --------------------------------------------------------
-
-    if dpkg-query -W -f='${Status}\n' rkhunter 2>/dev/null |
-       grep -Eq '^(install ok half-configured|install reinstreq half-configured|deinstall ok half-configured)$'; then
-
-        warning "Bozuk rkhunter yapılandırması algılandı."
-
-        if dpkg --remove --force-remove-reinstreq rkhunter \
-            >/dev/null 2>&1; then
-
-            success "Bozuk rkhunter paketi kaldırıldı."
-
-        else
-
-            warning "rkhunter doğrudan kaldırılamadı."
-        fi
-    fi
-
-    # --------------------------------------------------------
-    # Genel bağımlılık onarımı
-    # --------------------------------------------------------
-
-    if dpkg --configure -a; then
-
-        success "dpkg düzeltildi."
-        return 0
-    fi
-
-    if apt-get -f install -y; then
-
-        if dpkg --configure -a; then
-
-            success "Paket yöneticisi düzeltildi."
-            return 0
-        fi
-    fi
-
-    error_msg "dpkg onarılamadı."
-    return 1
-}
-
-# ============================================================
-# APT UPDATE
-# ============================================================
-
-apt_update() {
-
-    printf '\n'
-    printf '%b============================================%b\n' \
-        "$CYAN" "$NC"
-
-    printf '%bAPT PAKET LİSTELERİ GÜNCELLENİYOR%b\n' \
-        "$CYAN" "$NC"
-
-    printf '%b============================================%b\n\n' \
-        "$CYAN" "$NC"
-
-    ensure_kali_sources || return 1
-
-    wait_for_apt_lock || return 1
-
-    repair_dpkg || return 1
-
-    if apt-get update; then
-
-        success "APT paket listeleri güncellendi."
-        return 0
-
-    fi
-
-    error_msg "apt-get update başarısız oldu."
-
-    if [[ "$OS_ID" == "kali" ]]; then
-
-        printf '\n'
-        warning "Kali APT kaynağı:"
-        printf '  /etc/apt/sources.list.d/kali.sources\n'
-        printf '\n'
-    fi
-
-    return 1
-}
-
-# ============================================================
-# PAKET KONTROLÜ
-# ============================================================
-
-package_installed() {
-
-    local package="$1"
-
-    dpkg-query \
-        -W \
-        -f='${Status}' \
-        "$package" 2>/dev/null |
-        grep -q '^install ok installed$'
-}
-
-package_available() {
-
-    local package="$1"
-
-    [[ -n "$package" ]] || return 1
-
-    apt-cache show "$package" >/dev/null 2>&1
-}
-
-# ============================================================
-# PAKET LİSTESİ
-# ============================================================
-
-build_package_list() {
-
-    REQUESTED_PACKAGES=()
-
-    # ========================================================
-    # TÜRKÇELEŞTİRME
-    # ========================================================
-
-    if [[ "$DO_TURKISH" -eq 1 ]]; then
-
-        REQUESTED_PACKAGES+=(
-            locales
-            keyboard-configuration
-            console-setup
-            console-setup-linux
-
-            fonts-dejavu
-            fonts-liberation
-            fonts-noto-core
-            fonts-noto-mono
-            fonts-noto-cjk
-
-            firefox-esr-l10n-tr
-            firefox-l10n-tr
-            chromium-l10n
-            libreoffice-l10n-tr
-
-            manpages-tr
-            manpages-tr-dev
-        )
-    fi
-
-    # ========================================================
-    # PENTEST
-    # ========================================================
-
-    if [[ "$DO_PENTEST" -eq 1 ]]; then
-
-        # ----------------------------------------------------
-        # WEB / RECON
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            nmap
-            ncat
-            ndiff
-            nikto
-            sqlmap
-            gobuster
-            dirsearch
-            ffuf
-            feroxbuster
-            nuclei
-            whatweb
-            wafw00f
-            dnsenum
-            dnsrecon
-            fierce
-            amass
-            burpsuite
-            mitmproxy
-            zaproxy
-        )
-
-        # ----------------------------------------------------
-        # REVERSE ENGINEERING
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            ghex
-            ghidra
-            jadx
-            rizin
-            radare2
-            rizin-cutter
-            rz-ghidra
-            apktool
-            dex2jar
-            bytecode-viewer
-            jd-gui
-            ropper
-            edb-debugger
-            binwalk
-            yara
-            gdb
-            strace
-            ltrace
-            binutils
-        )
-
-        # ----------------------------------------------------
-        # WINDOWS / AD / SMB
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            evil-winrm
-            samba
-            smbclient
-            cifs-utils
-            ldap-utils
-            enum4linux
-            enum4linux-ng
-            impacket-scripts
-            netexec
-            responder
-            bloodyad
-        )
-
-        # ----------------------------------------------------
-        # STEGANOGRAPHY / FORENSICS
-        #
-        # rkhunter burada özellikle YOK.
-        # kali-tools-forensics metapackage de kullanılmıyor.
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            steghide
-            stegsnow
-            outguess
-            exiftool
-            foremost
-            sleuthkit
-            autopsy
-            testdisk
-            dc3dd
-            scalpel
-        )
-
-        # ----------------------------------------------------
-        # NETWORK / TRAFFIC
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            wireshark
-            tshark
-            tcpdump
-            netcat-openbsd
-            socat
-            bettercap
-            ettercap-graphical
-            arp-scan
-            traceroute
-            iperf3
-            masscan
-        )
-
-        # ----------------------------------------------------
-        # PASSWORD / HASH
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            hashcat
-            john
-            hashid
-            hydra
-            medusa
-            patator
-            crunch
-            seclists
-            wordlists
-        )
-
-        # ----------------------------------------------------
-        # WIRELESS
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            aircrack-ng
-            reaver
-            bully
-            kismet
-            hcxdumptool
-            hcxpcapngtool
-            wifite
-            rfkill
-            iw
-        )
-
-        # ----------------------------------------------------
-        # GVM / OPENVAS
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            gvm
-        )
-
-        # ----------------------------------------------------
-        # YARDIMCI ARAÇLAR
-        # ----------------------------------------------------
-
-        REQUESTED_PACKAGES+=(
-            gedit
-            plank
-            terminator
-            kazam
-            sonic-visualiser
-
-            fzf
-            ripgrep
-            tmux
-            btop
-            jq
-            curl
-            wget
-            unzip
-            p7zip-full
-            git
-            gh
-        )
-    fi
-}
-
-# ============================================================
-# DUPLICATE TEMİZLEME
-# ============================================================
-
-deduplicate_packages() {
-
-    local package
-    local -A seen=()
-
-    UNIQUE_PACKAGES=()
-
-    for package in "${REQUESTED_PACKAGES[@]}"; do
-
-        [[ -n "$package" ]] || continue
-
-        if [[ -z "${seen[$package]+x}" ]]; then
-
-            seen["$package"]=1
-            UNIQUE_PACKAGES+=("$package")
-        fi
-    done
-}
-
-# ============================================================
-# PAKETLERİ TOPLU KUR
-# ============================================================
-
-install_selected_packages() {
-
-    deduplicate_packages
-
-    TOTAL_REQUESTED="${#UNIQUE_PACKAGES[@]}"
-
-    AVAILABLE_PACKAGES=()
-
-    printf '\n'
-    printf '%bPaketler kontrol ediliyor...%b\n\n' \
-        "$CYAN" "$NC"
-
-    local package
-
-    for package in "${UNIQUE_PACKAGES[@]}"; do
-
-        if package_installed "$package"; then
-
-            ((TOTAL_ALREADY++))
-
-            printf '%b[VAR]%b       %s\n' \
-                "$GREEN" "$NC" "$package"
-
+        if package_installed "$pkg"; then
+            ok "$pkg zaten kurulu."
             continue
         fi
 
-        if package_available "$package"; then
-
-            AVAILABLE_PACKAGES+=("$package")
-
-            ((TOTAL_AVAILABLE++))
-
-            printf '%b[HAZIR]%b     %s\n' \
-                "$CYAN" "$NC" "$package"
-
+        if package_available "$pkg"; then
+            valid+=("$pkg")
         else
-
-            ((TOTAL_MISSING++))
-
-            printf '%b[YOK]%b       %s\n' \
-                "$YELLOW" "$NC" "$package"
+            warn "$pkg bulunamadı; atlanıyor."
+            SKIPPED+=("$pkg")
         fi
     done
 
-    if [[ "${#AVAILABLE_PACKAGES[@]}" -eq 0 ]]; then
-
-        success "Yeni kurulacak paket bulunamadı."
+    if ((${#valid[@]} == 0)); then
         return 0
     fi
 
-    printf '\n'
-    info "${#AVAILABLE_PACKAGES[@]} paket kurulacak."
+    #
+    # Önce grup halinde kur
+    #
 
-    wait_for_apt_lock || return 1
+    if apt-get install \
+        -y \
+        "${valid[@]}" \
+        >>"$LOG_FILE" 2>&1; then
 
-    printf '\n'
+        for pkg in "${valid[@]}"; do
+            if package_installed "$pkg"; then
+                ok "$pkg kuruldu."
+                INSTALLED+=("$pkg")
+            else
+                safe_apt_install "$pkg"
+            fi
+        done
 
-    # --------------------------------------------------------
-    # Önce toplu kurulum
-    # --------------------------------------------------------
-
-    if DEBIAN_FRONTEND=noninteractive \
-        apt-get install -y \
-        --no-install-recommends \
-        "${AVAILABLE_PACKAGES[@]}"; then
-
-        TOTAL_INSTALLED="${#AVAILABLE_PACKAGES[@]}"
-
-        success "Toplu paket kurulumu tamamlandı."
         return 0
     fi
 
-    # --------------------------------------------------------
-    # Toplu kurulum bazı paketler yüzünden başarısızsa,
-    # paketleri tek tek deneyerek geri kalanları kurtar.
-    # --------------------------------------------------------
+    #
+    # Grup başarısızsa tek tek kur
+    #
 
-    warning "Toplu kurulum tamamen başarılı olmadı."
-    warning "Paketler tek tek deneniyor."
+    warn "$group_name toplu kurulumda hata verdi."
+    warn "Paketler tek tek deneniyor..."
 
-    local installed_now=0
-
-    for package in "${AVAILABLE_PACKAGES[@]}"; do
-
-        if package_installed "$package"; then
-
-            ((installed_now++))
-            continue
-        fi
-
-        printf '%b[%s]%b %s\n' \
-            "$CYAN" "DENENİYOR" "$NC" "$package"
-
-        if DEBIAN_FRONTEND=noninteractive \
-            apt-get install -y \
-            --no-install-recommends \
-            "$package" >/dev/null 2>&1; then
-
-            ((installed_now++))
-
-        else
-
-            ((TOTAL_FAILED++))
-
-            warning "Kurulamadı: $package"
-        fi
+    for pkg in "${valid[@]}"; do
+        safe_apt_install "$pkg"
     done
-
-    TOTAL_INSTALLED="$installed_now"
 }
 
-# ============================================================
-# TÜRKÇE KONFİGÜRASYONU
-# ============================================================
+setup_locale() {
+    info "Türkçe locale hazırlanıyor..."
 
-configure_turkish() {
-
-    [[ "$DO_TURKISH" -eq 1 ]] || return 0
-
-    printf '\n'
-    printf '%b============================================%b\n' \
-        "$CYAN" "$NC"
-
-    printf '%bTÜRKÇELEŞTİRME UYGULANIYOR%b\n' \
-        "$CYAN" "$NC"
-
-    printf '%b============================================%b\n\n' \
-        "$CYAN" "$NC"
-
-    # --------------------------------------------------------
-    # LOCALE
-    # --------------------------------------------------------
+    backup_file /etc/default/locale
+    backup_file /etc/locale.gen
 
     if [[ -f /etc/locale.gen ]]; then
-
-        sed -i \
-            -E \
-            '/^[[:space:]#]*tr_TR\.UTF-8[[:space:]]+UTF-8[[:space:]]*$/d' \
-            /etc/locale.gen \
-            2>/dev/null || true
-
-        printf '%s\n' \
-            'tr_TR.UTF-8 UTF-8' >> /etc/locale.gen
+        if ! grep -qE '^tr_TR\.UTF-8[[:space:]]+UTF-8$' /etc/locale.gen; then
+            printf '%s\n' 'tr_TR.UTF-8 UTF-8' >> /etc/locale.gen
+        fi
+    else
+        printf '%s\n' 'tr_TR.UTF-8 UTF-8' > /etc/locale.gen
     fi
 
     if command -v locale-gen >/dev/null 2>&1; then
-
-        locale-gen tr_TR.UTF-8 \
-            >/dev/null 2>&1 || true
+        locale-gen tr_TR.UTF-8 >>"$LOG_FILE" 2>&1 || true
     fi
 
     if command -v update-locale >/dev/null 2>&1; then
-
         update-locale \
             LANG=tr_TR.UTF-8 \
             LANGUAGE=tr_TR:tr \
-            >/dev/null 2>&1 || true
-
+            LC_ALL=tr_TR.UTF-8 \
+            >>"$LOG_FILE" 2>&1 || true
     else
-
-        cat > /etc/default/locale <<'EOF'
+        cat > /etc/default/locale <<'EOF_LOCALE'
 LANG=tr_TR.UTF-8
 LANGUAGE=tr_TR:tr
-EOF
-
+LC_ALL=tr_TR.UTF-8
+EOF_LOCALE
     fi
 
-    cat > /etc/profile.d/turkish-locale.sh <<'EOF'
-export LANG=tr_TR.UTF-8
-export LANGUAGE=tr_TR:tr
-EOF
+    export LANG=tr_TR.UTF-8
+    export LANGUAGE=tr_TR:tr
+    export LC_ALL=tr_TR.UTF-8
 
-    chmod 644 /etc/profile.d/turkish-locale.sh
+    ok "Türkçe locale ayarlandı."
+}
 
-    # --------------------------------------------------------
-    # KLAVYE
-    # --------------------------------------------------------
+setup_keyboard() {
+    info "Türkçe Q klavye ayarlanıyor..."
 
-    cat > /etc/default/keyboard <<'EOF'
+    backup_file /etc/default/keyboard
+
+    cat > /etc/default/keyboard <<'EOF_KEYBOARD'
 XKBMODEL="pc105"
 XKBLAYOUT="tr"
 XKBVARIANT=""
 XKBOPTIONS=""
 BACKSPACE="guess"
-EOF
+EOF_KEYBOARD
+
+    #
+    # Debian keyboard-config debconf
+    #
+
+    if command -v debconf-set-selections >/dev/null 2>&1; then
+
+        printf '%s\n' \
+            'keyboard-configuration keyboard-configuration/layoutcode string tr' \
+            'keyboard-configuration keyboard-configuration/modelcode string pc105' \
+            'keyboard-configuration keyboard-configuration/variant select Turkish' \
+            | debconf-set-selections 2>/dev/null || true
+    fi
+
+    #
+    # Konsol
+    #
+
+    if command -v setupcon >/dev/null 2>&1; then
+        setupcon -k --save 2>/dev/null || true
+    fi
+
+    #
+    # Systemd/localectl mevcutsa X11
+    #
 
     if command -v localectl >/dev/null 2>&1; then
-
-        localectl set-x11-keymap \
-            tr pc105 "" "" \
-            >/dev/null 2>&1 || true
-
-        localectl set-keymap tr \
-            >/dev/null 2>&1 || true
+        localectl set-keymap tr 2>/dev/null || true
+        localectl set-x11-keymap tr pc105 2>/dev/null || true
     fi
 
-    if command -v setxkbmap >/dev/null 2>&1 &&
-       [[ -n "${DISPLAY:-}" ]]; then
-
-        setxkbmap tr >/dev/null 2>&1 || true
-    fi
-
-    # --------------------------------------------------------
-    # FONT CACHE
-    # --------------------------------------------------------
-
-    if command -v fc-cache >/dev/null 2>&1; then
-
-        fc-cache -f >/dev/null 2>&1 || true
-    fi
-
-    # --------------------------------------------------------
-    # GNOME
-    # --------------------------------------------------------
-
-    if [[ "${DESKTOP,,}" == *gnome* ]] &&
-       [[ "$TARGET_USER" != "root" ]] &&
-       command -v gsettings >/dev/null 2>&1; then
-
-        local uid
-
-        uid="$(
-            id -u "$TARGET_USER" 2>/dev/null ||
-            printf '0'
-        )"
-
-        if [[ -S "/run/user/$uid/bus" ]]; then
-
-            runuser -u "$TARGET_USER" -- \
-                env \
-                HOME="$TARGET_HOME" \
-                XDG_RUNTIME_DIR="/run/user/$uid" \
-                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-                gsettings set \
-                org.gnome.system.locale \
-                region \
-                'tr_TR.UTF-8' \
-                >/dev/null 2>&1 || true
-        fi
-    fi
-
-    success "Türkçe locale ve klavye ayarları uygulandı."
-
-    warning "Tam uygulanması için oturumu kapatıp açmanız önerilir."
+    ok "Türkçe Q klavye ayarı yazıldı."
 }
 
-# ============================================================
-# YEDEK
-# ============================================================
+install_language_packages() {
+    local firefox_pkg=""
+    local chromium_pkg=""
+    local office_pkg=""
+    local man_pkg=""
 
-create_backup() {
+    #
+    # Firefox
+    #
 
-    local timestamp
-
-    timestamp="$(date '+%Y%m%d_%H%M%S')"
-
-    BACKUP_DIR="/root/linux-turkce-backup-$timestamp"
-
-    if ! mkdir -p "$BACKUP_DIR"; then
-
-        warning "Yedek klasörü oluşturulamadı."
-        BACKUP_DIR=""
-        return 1
+    if package_available firefox-esr-l10n-tr; then
+        firefox_pkg="firefox-esr-l10n-tr"
+    elif package_available firefox-l10n-tr; then
+        firefox_pkg="firefox-l10n-tr"
     fi
 
-    local file
+    #
+    # Chromium
+    #
 
-    for file in \
-        /etc/locale.gen \
-        /etc/default/locale \
-        /etc/default/keyboard \
-        /etc/hostname \
-        /etc/hosts; do
+    if package_available chromium-l10n; then
+        chromium_pkg="chromium-l10n"
+    fi
 
-        if [[ -f "$file" ]]; then
+    #
+    # LibreOffice
+    #
 
-            cp -a "$file" "$BACKUP_DIR/" \
+    if package_available libreoffice-l10n-tr; then
+        office_pkg="libreoffice-l10n-tr"
+    fi
+
+    #
+    # Türkçe man pages
+    #
+
+    if package_available manpages-tr; then
+        man_pkg="manpages-tr"
+    fi
+
+    [[ -n "$firefox_pkg" ]] && safe_apt_install "$firefox_pkg"
+    [[ -n "$chromium_pkg" ]] && safe_apt_install "$chromium_pkg"
+    [[ -n "$office_pkg" ]] && safe_apt_install "$office_pkg"
+    [[ -n "$man_pkg" ]] && safe_apt_install "$man_pkg"
+}
+
+backup_user_configs() {
+    local target_user="${SUDO_USER:-${USER:-root}}"
+    local home_dir
+
+    home_dir="$(
+        getent passwd "$target_user" 2>/dev/null |
+        cut -d: -f6
+    )"
+
+    if [[ -z "$home_dir" || ! -d "$home_dir" ]]; then
+        home_dir="/root"
+    fi
+
+    mkdir -p "$BACKUP_DIR/user" 2>/dev/null || true
+
+    local path
+
+    for path in \
+        "$home_dir/.config/gtk-3.0/settings.ini" \
+        "$home_dir/.config/gtk-4.0/settings.ini" \
+        "$home_dir/.config/plank"; do
+
+        if [[ -e "$path" ]]; then
+            cp -a "$path" "$BACKUP_DIR/user/" \
                 2>/dev/null || true
         fi
     done
-
-    success "Sistem ayarları yedeklendi: $BACKUP_DIR"
 }
 
-# ============================================================
-# KURULUM ÖZETİ
-# ============================================================
+build_general_tools() {
+    GENERAL_TOOLS=(
+        curl
+        wget
+        git
+        gh
+        unzip
+        p7zip-full
+        xz-utils
+        zip
+        jq
+        rsync
+        ca-certificates
 
-show_summary() {
+        fzf
+        ripgrep
+        tmux
+        btop
+        eza
+        bat
 
-    printf '\n'
-    printf '%b====================================================%b\n' \
-        "$GREEN" "$NC"
+        neofetch
 
-    printf '%b              KURULUM TAMAMLANDI%b\n' \
-        "$GREEN" "$NC"
+        gedit
+        kate
+        vim
+        nano
 
-    printf '%b====================================================%b\n' \
-        "$GREEN" "$NC"
+        terminator
+        plank
+        kazam
+        flameshot
+        arandr
+        lxappearance
+        feh
+        picom
+        unclutter-xfixes
 
-    printf '\n'
+        sonic-visualiser
+        ghex
 
-    printf 'Sistem       : %s\n' "$OS_NAME"
-    printf 'Masaüstü     : %s\n' "$DESKTOP"
-    printf 'Kullanıcı    : %s\n' "$TARGET_USER"
+        samba
+        smbclient
+        cifs-utils
+        ldap-utils
 
-    printf '\n'
-
-    printf '%bTürkçeleştirme:%b %s\n' \
-        "$WHITE" "$NC" \
-        "$(
-            if [[ "$DO_TURKISH" -eq 1 ]]; then
-                printf 'EVET'
-            else
-                printf 'HAYIR'
-            fi
-        )"
-
-    printf '%bPentest:%b %s\n' \
-        "$WHITE" "$NC" \
-        "$(
-            if [[ "$DO_PENTEST" -eq 1 ]]; then
-                printf 'EVET'
-            else
-                printf 'HAYIR'
-            fi
-        )"
-
-    printf '\n'
-
-    printf '%bPAKETLER%b\n' \
-        "$CYAN" "$NC"
-
-    printf '  Kontrol edilen : %s\n' "$TOTAL_REQUESTED"
-    printf '  Yeni kurulan   : %s\n' "$TOTAL_INSTALLED"
-    printf '  Zaten kurulu   : %s\n' "$TOTAL_ALREADY"
-    printf '  Depoda yok     : %s\n' "$TOTAL_MISSING"
-    printf '  Kurulum hatası : %s\n' "$TOTAL_FAILED"
-
-    if [[ -n "$BACKUP_DIR" ]]; then
-
-        printf '\n'
-        printf 'Yedek          : %s\n' "$BACKUP_DIR"
-    fi
-
-    if package_installed gvm; then
-
-        printf '\n'
-        printf '%bGVM / OPENVAS KURULU%b\n' \
-            "$MAGENTA" "$NC"
-
-        printf '\n'
-        printf 'İlk yapılandırma:\n'
-        printf '  sudo gvm-setup\n'
-        printf '\n'
-        printf 'Kontrol:\n'
-        printf '  sudo gvm-check-setup\n'
-        printf '\n'
-        printf 'Başlatma:\n'
-        printf '  sudo gvm-start\n'
-    fi
-
-    printf '\n'
-
-    warning "Değişikliklerin tamamen uygulanması için:"
-    printf '  sudo reboot\n'
-
-    printf '\n'
-
-    success "İşlem tamamlandı."
+        net-tools
+        iproute2
+        traceroute
+        iperf3
+        socat
+        netcat-openbsd
+    )
 }
 
-# ============================================================
-# MAIN
-# ============================================================
+build_network_tools() {
+    NETWORK_TOOLS=(
+        nmap
+        ncat
+        ndiff
+        masscan
+        arp-scan
+        tcpdump
+        tshark
+        wireshark
+        bettercap
+        ettercap-graphical
+        mitmproxy
+
+        aircrack-ng
+        reaver
+        bully
+        kismet
+        wifite
+        hcxdumptool
+        hcxpcapngtool
+
+        rfkill
+        iw
+    )
+}
+
+build_web_tools() {
+    WEB_TOOLS=(
+        nikto
+        sqlmap
+        gobuster
+        dirsearch
+        ffuf
+        feroxbuster
+        nuclei
+
+        whatweb
+        wafw00f
+
+        dnsenum
+        dnsrecon
+        fierce
+        amass
+
+        burpsuite
+        zaproxy
+    )
+}
+
+build_reverse_tools() {
+    REVERSE_TOOLS=(
+        ghidra
+        jadx
+        rizin
+        radare2
+        rizin-cutter
+        rz-ghidra
+
+        apktool
+        dex2jar
+        bytecode-viewer
+        jd-gui
+
+        ropper
+        edb-debugger
+
+        binwalk
+        yara
+
+        gdb
+        strace
+        ltrace
+        binutils
+
+        cutter
+        ghex
+    )
+}
+
+build_windows_tools() {
+    WINDOWS_TOOLS=(
+        evil-winrm
+        enum4linux
+        enum4linux-ng
+        impacket-scripts
+        netexec
+        responder
+        bloodyad
+
+        samba
+        smbclient
+        cifs-utils
+        ldap-utils
+    )
+}
+
+build_stego_forensic_tools() {
+    FORENSIC_TOOLS=(
+        steghide
+        stegsnow
+        outguess
+
+        exiftool
+        foremost
+        sleuthkit
+        autopsy
+        testdisk
+        dc3dd
+        scalpel
+        ssdeep
+        unhide
+    )
+}
+
+build_password_tools() {
+    PASSWORD_TOOLS=(
+        hashcat
+        john
+        hashid
+        hydra
+        medusa
+        patator
+        crunch
+
+        seclists
+        wordlists
+    )
+}
+
+build_vuln_tools() {
+    VULN_TOOLS=(
+        gvm
+    )
+}
+
+build_optional_named_tools() {
+    OPTIONAL_TOOLS=()
+
+    #
+    # Arsenal
+    #
+
+    if package_available arsenal-ng; then
+        OPTIONAL_TOOLS+=("arsenal-ng")
+    elif package_available arsenal; then
+        OPTIONAL_TOOLS+=("arsenal")
+    fi
+
+    #
+    # Sublime Text:
+    # Üçüncü taraf repo otomatik eklenmez.
+    # Mevcut APT kaynağında varsa kurulur.
+    #
+
+    if package_available sublime-text; then
+        OPTIONAL_TOOLS+=("sublime-text")
+    fi
+}
+
+install_pentest_stack() {
+    build_general_tools
+    build_network_tools
+    build_web_tools
+    build_reverse_tools
+    build_windows_tools
+    build_stego_forensic_tools
+    build_password_tools
+    build_vuln_tools
+    build_optional_named_tools
+
+    install_group \
+        "Genel / Masaüstü / Yardımcı" \
+        "${GENERAL_TOOLS[@]}"
+
+    install_group \
+        "Ağ / Kablosuz" \
+        "${NETWORK_TOOLS[@]}"
+
+    install_group \
+        "Web / Recon" \
+        "${WEB_TOOLS[@]}"
+
+    install_group \
+        "Reverse Engineering" \
+        "${REVERSE_TOOLS[@]}"
+
+    install_group \
+        "Windows / AD / SMB" \
+        "${WINDOWS_TOOLS[@]}"
+
+    install_group \
+        "Stego / Forensics" \
+        "${FORENSIC_TOOLS[@]}"
+
+    install_group \
+        "Hash / Password" \
+        "${PASSWORD_TOOLS[@]}"
+
+    install_group \
+        "Vulnerability / GVM" \
+        "${VULN_TOOLS[@]}"
+
+    install_group \
+        "Özel araçlar" \
+        "${OPTIONAL_TOOLS[@]}"
+
+    #
+    # JWT Tool
+    #
+    # Rastgele pip/GitHub kaynağı kullanılmaz.
+    #
+
+    if package_available jwt-tool; then
+        safe_apt_install jwt-tool
+    else
+        SKIPPED+=(
+            "jwt-tool (APT kaynağında yok; üçüncü taraf kurulum yapılmadı)"
+        )
+    fi
+}
+
+post_install_repair() {
+    info "Kurulum sonrası dpkg/bağımlılık kontrolü..."
+
+    wait_for_apt_lock || true
+
+    apt-get -f install -y \
+        >>"$LOG_FILE" 2>&1 || \
+        warn "Kurulum sonrası apt -f install başarısız."
+
+    dpkg --configure -a \
+        >>"$LOG_FILE" 2>&1 || \
+        warn "Kurulum sonrası dpkg --configure -a başarısız."
+
+    #
+    # Bir kez daha kontrol
+    #
+
+    if dpkg --audit 2>/dev/null | grep -q .; then
+        warn "Kurulum sonunda hâlâ işlem bekleyen paket var."
+    else
+        ok "Kurulum sonunda dpkg temiz."
+    fi
+}
+
+check_core_commands() {
+    local cmds=(
+        bash
+        apt-get
+        dpkg
+        locale-gen
+    )
+
+    local missing=()
+    local c
+
+    for c in "${cmds[@]}"; do
+        if ! command -v "$c" >/dev/null 2>&1; then
+            missing+=("$c")
+        fi
+    done
+
+    if ((${#missing[@]})); then
+        warn "Temel komut eksik: ${missing[*]}"
+    fi
+}
+
+summary() {
+    printf '\n'
+    printf '============================================================\n'
+    printf '  Linux Türkçe + Pentest Kurulum Özeti v%s\n' "$VERSION"
+    printf '============================================================\n'
+
+    printf '  Log      : %s\n' "$LOG_FILE"
+    printf '  Yedekler : %s\n' "$BACKUP_DIR"
+
+    printf '\n'
+
+    printf 'Kurulan paket sayısı: %d\n' "${#INSTALLED[@]}"
+
+    if ((${#SKIPPED[@]})); then
+        printf '\n'
+        printf 'Bulunamadığı için atlananlar:\n'
+
+        printf '  - %s\n' "${SKIPPED[@]}"
+    fi
+
+    if ((${#FAILED[@]})); then
+        printf '\n'
+        printf 'Kurulumu başarısız olup devam edilenler:\n'
+
+        printf '  - %s\n' "${FAILED[@]}"
+    fi
+
+    printf '\n'
+    printf 'Son dpkg denetimi:\n'
+
+    if dpkg --audit 2>/dev/null | grep -q .; then
+        printf '  UYARI: dpkg hâlâ işlem bekleyen paket gösteriyor.\n'
+        dpkg --audit 2>/dev/null |
+            sed 's/^/  /'
+    else
+        printf '  OK: dpkg temiz görünüyor.\n'
+    fi
+
+    if is_kali &&
+       [[ -f /etc/apt/sources.list.d/kali.sources ]]; then
+
+        printf '\n'
+        printf 'Kali APT:\n'
+        printf '  /etc/apt/sources.list.d/kali.sources doğrulandı.\n'
+    fi
+
+    printf '\n'
+    printf 'Log dosyası: %s\n' "$LOG_FILE"
+    printf 'Yedekler  : %s\n' "$BACKUP_DIR"
+    printf '\n'
+    printf 'Kurulum tamamlandı.\n'
+    printf 'Türkçe locale/klavye için oturumu kapatıp açmanız önerilir.\n'
+}
+
+ask_yes_no() {
+    local prompt="$1"
+    local answer
+
+    while :; do
+
+        read -r -p "$prompt" answer
+
+        answer="${answer:-E}"
+
+        case "$answer" in
+            E|e|evet|EVET|Y|y|yes|YES)
+                return 0
+                ;;
+
+            H|h|hayır|hayir|HAYIR|N|n|no|NO)
+                return 1
+                ;;
+
+            *)
+                printf 'Lütfen E veya H girin.\n'
+                ;;
+        esac
+    done
+}
 
 main() {
+    ensure_root
+    prepare_log
+    check_core_commands
 
-    init_log
+    INSTALLED=()
+    SKIPPED=()
+    FAILED=()
 
-    check_root
-
-    load_system_info
-
-    detect_target_user
-
-    detect_desktop
-
-    printf '\n'
-    printf '%bLinux Türkçeleştirme + Pentest Kurulum Aracı%b\n' \
-        "$CYAN" "$NC"
-    printf '%bSürüm: %s%b\n\n' \
-        "$GRAY" "$VERSION" "$NC"
-
-    printf 'Sistem   : %s\n' "$OS_NAME"
-    printf 'Masaüstü : %s\n' "$DESKTOP"
-    printf 'Kullanıcı: %s\n' "$TARGET_USER"
+    GENERAL_TOOLS=()
+    NETWORK_TOOLS=()
+    WEB_TOOLS=()
+    REVERSE_TOOLS=()
+    WINDOWS_TOOLS=()
+    FORENSIC_TOOLS=()
+    PASSWORD_TOOLS=()
+    VULN_TOOLS=()
+    OPTIONAL_TOOLS=()
 
     printf '\n'
+    printf '============================================================\n'
+    printf '  LINUX TÜRKÇE + PENTEST KURULUM YÖNETİCİSİ v%s\n' "$VERSION"
+    printf '============================================================\n'
+    printf '\n'
 
-    # ========================================================
-    # SADECE 2 SORU
-    # ========================================================
+    #
+    # SADECE İKİ SORU
+    #
 
-    if ask_yes_no "Linux Türkçe yapılsın mı?"; then
-        DO_TURKISH=1
-    else
-        DO_TURKISH=0
+    local do_turkish=0
+    local do_pentest=0
+
+    if ask_yes_no 'Linux Türkçe yapılsın mı? [E/h]: '; then
+        do_turkish=1
     fi
 
-    if ask_yes_no "Pentest araçları kurulsun mu?"; then
-        DO_PENTEST=1
-    else
-        DO_PENTEST=0
+    if ask_yes_no 'Pentest araçları kurulsun mu? [E/h]: '; then
+        do_pentest=1
     fi
 
-    if [[ "$DO_TURKISH" -eq 0 &&
-          "$DO_PENTEST" -eq 0 ]]; then
+    #
+    # Distro kontrolü
+    #
 
-        info "Hiçbir işlem seçilmedi."
-        exit 0
-    fi
-
-    # ========================================================
-    # APT
-    # ========================================================
-
-    if ! apt_update; then
-
-        error_msg "APT hazırlanamadığı için kurulum durduruldu."
+    if ! is_debian_family; then
+        err "Bu script yalnızca Kali/Debian/Ubuntu için tasarlanmıştır."
         exit 1
     fi
 
-    # ========================================================
-    # YEDEK
-    # ========================================================
+    #
+    # APT
+    #
 
-    if [[ "$DO_TURKISH" -eq 1 ]]; then
-        create_backup
+    info "APT hazırlanıyor..."
+
+    if ! apt_update; then
+        err "APT update başarısız."
+        err "Ayrıntılı log:"
+        err "$LOG_FILE"
+        exit 1
     fi
 
-    # ========================================================
-    # PAKET LİSTESİ
-    # ========================================================
+    #
+    # Türkçe
+    #
 
-    build_package_list
+    if ((do_turkish)); then
 
-    # ========================================================
-    # PAKET KURULUMU
-    # ========================================================
+        info "Türkçe yapılandırma başlıyor..."
 
-    install_selected_packages
+        backup_user_configs
 
-    # ========================================================
-    # TÜRKÇELEŞTİRME
-    # ========================================================
+        setup_locale
+        setup_keyboard
+        install_language_packages
 
-    configure_turkish
+    fi
 
-    # ========================================================
-    # SON KONTROL
-    # ========================================================
+    #
+    # Pentest
+    #
 
-    final_system_check() {
+    if ((do_pentest)); then
 
-        printf '\n'
-        info "Son sistem kontrolleri yapılıyor..."
+        info "Pentest araçları kurulumu başlıyor..."
 
-        dpkg --configure -a >/dev/null 2>&1 || true
+        install_pentest_stack
 
-        if command -v fc-cache >/dev/null 2>&1; then
-            fc-cache -f >/dev/null 2>&1 || true
-        fi
+    fi
 
-        success "Son kontroller tamamlandı."
-    }
+    #
+    # Son onarım
+    #
 
-    final_system_check
+    post_install_repair
 
-    # ========================================================
-    # ÖZET
-    # ========================================================
+    #
+    # Sonuç
+    #
 
-    show_summary
+    summary
 }
 
 main "$@"
