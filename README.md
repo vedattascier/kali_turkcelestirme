@@ -1,89 +1,418 @@
-# 🇹🇷 Kali Türkçeleştirme
+````markdown
+# 🇹🇷 Linux Türkçeleştirme + Pentest Kurulum Aracı
 
-Kali Linux'u Türkçe kullanıma hazırlamak için geliştirilmiş, tek dosyalık Bash aracıdır.
+![Linux](https://img.shields.io/badge/Linux-Kali%20%7C%20Debian%20%7C%20Ubuntu-blue)
+![Version](https://img.shields.io/badge/version-2026.8-green)
+![Shell](https://img.shields.io/badge/Shell-Bash-orange)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-## 🚀 Tek Komutla Çalıştır
+Kali Linux, Debian ve Ubuntu tabanlı sistemleri Türkçeleştirmek ve
+yetkili güvenlik testleri, CTF ve laboratuvar çalışmaları için gerekli
+pentest araçlarını tek bir Bash scripti ile kurmak için hazırlanmıştır.
 
-Scripti GitHub üzerinden doğrudan çalıştırabilirsiniz:
+---
+
+## ✨ Özellikler
+
+Script çalıştırıldığında yalnızca iki seçim sorar:
+
+```text
+Linux Türkçe yapılsın mı? [E/h]:
+
+Pentest araçları kurulsun mu? [E/h]:
+````
+
+Seçimlerden sonra işlemler otomatik olarak gerçekleştirilir.
+
+### 🇹🇷 Türkçeleştirme
+
+* `tr_TR.UTF-8` locale
+* Türkçe Q klavye
+* GNOME desteği
+* KDE desteği
+* XFCE desteği
+* Türkçe karakter destekli fontlar
+* Firefox Türkçe dil paketi
+* Chromium Türkçe dil paketi
+* LibreOffice Türkçe dil paketi
+* Türkçe man sayfaları
+* Sistem `/etc/profile.d/` locale yapılandırması
+
+### 🛡️ Pentest Araçları
+
+#### 🌐 Web / Recon
+
+* Nmap
+* Ncat
+* Ndif
+* Nikto
+* SQLMap
+* Gobuster
+* Dirsearch
+* FFUF
+* Feroxbuster
+* Nuclei
+* WhatWeb
+* WAFW00F
+* DNSenum
+* DNSRecon
+* Fierce
+* Amass
+* Burp Suite
+* mitmproxy
+* OWASP ZAP
+
+#### 🧩 Reverse Engineering
+
+* GHex
+* Ghidra
+* JADX
+* Rizin
+* Radare2
+* Rizin Cutter
+* rz-ghidra
+* APKTool
+* Dex2Jar
+* Bytecode Viewer
+* JD-GUI
+* Ropper
+* EDB Debugger
+* Binwalk
+* YARA
+* GDB
+* strace
+* ltrace
+* binutils
+
+#### 🪟 Windows / Active Directory / SMB
+
+* Evil-WinRM
+* Samba
+* SMBClient
+* CIFS Utils
+* LDAP Utils
+* Enum4Linux
+* Enum4Linux-ng
+* Impacket
+* NetExec
+* Responder
+* BloodyAD
+
+#### 🖼️ Steganography / Forensics
+
+* Steghide
+* StegSnow
+* OutGuess
+* ExifTool
+* Foremost
+* Sleuth Kit
+* Autopsy
+* TestDisk
+* DC3DD
+* Scalpel
+
+#### 🌐 Network / Traffic
+
+* Wireshark
+* TShark
+* TCPDump
+* Netcat
+* Socat
+* Bettercap
+* Ettercap
+* ARP-Scan
+* Traceroute
+* iPerf3
+* Masscan
+
+#### 🔐 Password / Hash
+
+* Hashcat
+* John the Ripper
+* HashID
+* Hydra
+* Medusa
+* Patator
+* Crunch
+* SecLists
+* Wordlists
+
+#### 📡 Wireless
+
+* Aircrack-ng
+* Reaver
+* Bully
+* Kismet
+* hcxdumptool
+* hcxpcapngtool
+* Wifite
+* rfkill
+* iw
+
+#### 🟢 Vulnerability Scanner
+
+* GVM / OpenVAS
+
+Kali üzerinde `gvm` paketi bulunuyorsa otomatik olarak kurulur.
+
+Kurulumdan sonra:
+
+```bash
+sudo gvm-setup
+sudo gvm-check-setup
+sudo gvm-start
+```
+
+---
+
+## 🛠️ Yardımcı Araçlar
+
+Script ayrıca mevcutsa aşağıdaki yardımcı araçları da kurar:
+
+* Gedit
+* Plank
+* Kazam
+* Terminator
+* Sonic Visualiser
+* fzf
+* ripgrep
+* tmux
+* btop
+* jq
+* curl
+* wget
+* unzip
+* p7zip
+* Git
+* GitHub CLI
+* eza
+* bat
+
+---
+
+# 🚀 Kurulum
+
+## 1. GitHub'dan doğrudan çalıştır
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh | sudo bash
 ```
 
-## ✨ Özellikler
+---
 
-* 🇹🇷 Türkçe sistem dili ve locale
-* ⌨️ Türkçe Q klavye
-* 🖥️ GNOME desteği
-* 🖥️ KDE Plasma desteği
-* 🌐 Chromium Türkçe dil desteği
-* 🦊 Firefox / Firefox ESR Türkçe dil desteği
-* 📄 LibreOffice Türkçe dil desteği
-* 📚 Türkçe man sayfaları
-* 🔤 Türkçe karakter destekli font kurulumu
-* 👤 Kullanıcı oluşturma
-* 🔑 Kullanıcı şifresi değiştirme
-* 🛡️ Kullanıcıya sudo yetkisi verme
-* 🚫 Sudo yetkisini kaldırma
-* ✏️ Kullanıcı adı değiştirme
-* 🗑️ Kullanıcı silme
-* 🖥️ Hostname değiştirme
-* 📊 Sistem bilgilerini görüntüleme
-* 📦 Paket arama
-* 🔄 APT paket listelerini güncelleme
-* 💾 Değişikliklerden önce otomatik yedekleme
-* 📝 Log kaydı
-* 🔄 Sistemi yeniden başlatma
-* 📋 Etkileşimli yönetim menüsü
+## 2. Dosyayı indirip çalıştır
 
-## 🖥️ Desteklenen Sistemler
+```bash
+git clone https://github.com/vedattascier/kali_turkcelestirme.git
+cd kali_turkcelestirme
+chmod +x linux-turkce.sh
+sudo ./linux-turkce.sh
+```
+
+---
+
+# 🔄 Kurulum Akışı
+
+Script başlatıldığında önce sistem bilgilerini algılar.
+
+Ardından:
+
+```text
+Linux Türkçeleştirme + Pentest Aracı
+```
+
+soruları gelir.
+
+### Soru 1
+
+```text
+Linux Türkçe yapılsın mı? [E/h]:
+```
+
+`E` seçilirse:
+
+```text
+APT
+ ↓
+Locale
+ ↓
+Türkçe Q Klavye
+ ↓
+GNOME / KDE / XFCE
+ ↓
+Fontlar
+ ↓
+Firefox / Chromium / LibreOffice
+ ↓
+Türkçe Man Sayfaları
+```
+
+kurulur.
+
+### Soru 2
+
+```text
+Pentest araçları kurulsun mu? [E/h]:
+```
+
+`E` seçilirse:
+
+```text
+Web / Recon
+ ↓
+Reverse Engineering
+ ↓
+Windows / AD / SMB
+ ↓
+Steganography / Forensics
+ ↓
+Network / Traffic
+ ↓
+Password / Hash
+ ↓
+Wireless
+ ↓
+GVM / OpenVAS
+ ↓
+Yardımcı Araçlar
+```
+
+kurulur.
+
+---
+
+# 🔄 APT Güncellemesi
+
+Paket kurulumundan önce:
+
+```bash
+apt-get update
+```
+
+otomatik olarak çalıştırılır.
+
+APT güncellemesi başarısız olursa script paket kurulumuna başlamaz.
+
+---
+
+# 💾 Otomatik Yedekleme
+
+Türkçeleştirme seçildiğinde sistem ayarlarının yedeği alınır.
+
+Yedek konumu:
+
+```text
+/root/linux-turkce-backup-TARIH_SAAT/
+```
+
+Yedeklenen dosyalar:
+
+```text
+/etc/locale.gen
+/etc/default/locale
+/etc/default/keyboard
+/etc/hostname
+/etc/hosts
+```
+
+---
+
+# ✅ Paket Kontrol Sistemi
+
+Script her paketi kurmadan önce kontrol eder.
+
+Paket zaten kuruluysa:
+
+```text
+[VAR]
+```
+
+Depoda bulunamıyorsa:
+
+```text
+[YOK]
+```
+
+Kuruluyorsa:
+
+```text
+[KURULUYOR]
+```
+
+Başarılı olursa:
+
+```text
+[ OK ]
+```
+
+hata olursa:
+
+```text
+[HATA]
+```
+
+gösterilir.
+
+Bir paketin bulunamaması bütün kurulumun durmasına neden olmaz.
+
+---
+
+# 📊 Kurulum Sonucu
+
+Kurulum sonunda özet gösterilir:
+
+```text
+PAKET İSTATİSTİKLERİ
+
+Kontrol edilen
+Yeni kurulan
+Zaten kurulu
+Depoda olmayan
+Kurulum hatası
+```
+
+Böylece hangi paketlerin kurulup hangilerinin sistem deposunda bulunmadığı görülebilir.
+
+---
+
+# 🖥️ Desteklenen Sistemler
 
 Öncelikli olarak:
 
 * Kali Linux
 * Debian
-* Debian tabanlı sistemler
+* Ubuntu
+* Debian/Ubuntu tabanlı sistemler
 
-> Paket isimleri ve masaüstü ortamlarına göre bazı özelliklerin kullanılabilirliği değişebilir.
+için tasarlanmıştır.
 
-## 📥 Kurulum
+Kali Linux üzerinde en uyumlu kullanım hedeflenmektedir.
 
-Scripti indirmek için:
+---
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh -o linux-turkce.sh
-```
+# ⚠️ Önemli
 
-Çalıştırmak için:
+Bu script güvenlik araçlarını kurar.
 
-```bash
-sudo bash linux-turkce.sh
-```
+Araçları yalnızca:
 
-Alternatif olarak tek komut:
+* Kendi sistemlerinizde
+* İzinli güvenlik testlerinde
+* CTF ortamlarında
+* Eğitim/laboratuvar sistemlerinde
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh | sudo bash
-```
+kullanın.
 
-## 🔐 Güvenli Kullanım
+Yetkisiz sistemlere karşı tarama, parola saldırısı veya başka bir güvenlik testi gerçekleştirmeyin.
 
-Root yetkisiyle çalışan scriptleri internetten doğrudan çalıştırmadan önce kodu incelemeniz önerilir.
+---
 
-Scripti görüntülemek:
+# 🧪 Script Kontrolü
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh
-```
-
-Dosyaya indirerek incelemek:
+Çalıştırmadan önce Bash sözdizimini kontrol etmek için:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh -o linux-turkce.sh
-```
-
-```bash
-less linux-turkce.sh
+bash -n linux-turkce.sh
 ```
 
 Daha sonra:
@@ -92,138 +421,54 @@ Daha sonra:
 sudo bash linux-turkce.sh
 ```
 
-## 👤 Kullanıcı Yönetimi
+---
 
-Araç üzerinden kullanıcı yönetimi yapılabilir:
+# 📄 Log
 
-* Yeni kullanıcı oluşturma
-* Kullanıcı şifresi değiştirme
-* Sudo yetkisi verme
-* Sudo yetkisini kaldırma
-* Kullanıcı adı değiştirme
-* Kullanıcı silme
-
-> Aktif olarak kullanılan hesabın adını değiştirmek sistemde sorun oluşturabileceğinden dikkatli kullanılmalıdır.
-
-## 🛡️ Root ve Sudo
-
-Araç kullanıcıya doğrudan root hesabı dönüştürmek yerine Linux'un standart yetkilendirme mekanizması olan `sudo` kullanımını tercih eder.
-
-Kullanıcıya sudo yetkisi vermek:
-
-```bash
-sudo usermod -aG sudo KULLANICI
-```
-
-## 🌐 Uygulama Dil Desteği
-
-Sistem ve paket yöneticisi üzerinden mevcut Türkçe dil paketleri kontrol edilir.
-
-Desteklenen uygulamalar arasında:
-
-* Chromium
-* Firefox / Firefox ESR
-* LibreOffice
-
-bulunur.
-
-> Her Linux uygulamasının Türkçe arayüzü bulunmayabilir. Script yalnızca dağıtımda mevcut olan uygun dil paketlerini kurmaya çalışır.
-
-## 💾 Yedekleme
-
-Sistem ayarlarında değişiklik yapılmadan önce yedekleme işlemi gerçekleştirilir.
-
-Yedekler aşağıdaki dizinde tutulur:
-
-```text
-/root/linux-turkce-backup-YYYYMMDD-HHMMSS/
-```
-
-## 📝 Log
-
-Script çalışma kayıtlarını aşağıdaki dosyaya yazabilir:
+Script çalışma kayıtlarını:
 
 ```text
 /var/log/linux-turkce.log
 ```
 
-Sorun yaşandığında bu log dosyası hata tespiti için kullanılabilir.
+dosyasına yazar.
 
-## ⌨️ Türkçe Klavye
-
-Sistem Türkçe Q klavye düzenine yapılandırılır.
-
-Masaüstü ortamına ve sistem yapılandırmasına göre uygulanacak yöntem otomatik olarak belirlenir.
-
-## 🖥️ Masaüstü Ortamları
-
-Script mevcut masaüstü ortamını algılamaya çalışır.
-
-Desteklenen ortamlar:
-
-* GNOME
-* KDE Plasma
-
-## 📊 Sistem Bilgileri
-
-Araç üzerinden aşağıdaki bilgiler görüntülenebilir:
-
-* İşletim sistemi
-* Kernel sürümü
-* Mimari
-* Hostname
-* CPU
-* RAM
-* Disk kullanımı
-* Aktif kullanıcı
-* Masaüstü ortamı
-
-## 🔄 Güncelleme
-
-GitHub'daki güncel scripti tekrar çalıştırmak için:
+Kontrol etmek için:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vedattascier/kali_turkcelestirme/main/linux-turkce.sh | sudo bash
+sudo tail -f /var/log/linux-turkce.log
 ```
 
-## 📂 Proje Yapısı
+---
 
-```text
-kali_turkcelestirme/
-├── linux-turkce.sh
-├── README.md
-└── LICENSE
+# 🔁 Yeniden Başlatma
+
+Türkçeleştirme sonrasında en iyi sonuç için:
+
+```bash
+sudo reboot
 ```
 
-## ⚠️ Uyarı
+komutu önerilir.
 
-Bu araç sistem yapılandırmalarında değişiklik yapar ve bazı işlemler için root yetkisi gerektirir.
+---
 
-Kullanımdan önce önemli dosyalarınızın yedeğini almanız önerilir.
-
-Özellikle:
-
-* Kullanıcı silme
-* Kullanıcı adı değiştirme
-* Sudo yetkisi değiştirme
-* Sistem ayarlarını değiştirme
-
-işlemlerinde dikkatli olunmalıdır.
-
-## 👨‍💻 Geliştirici
+# 👤 Geliştirici
 
 **Vedat Taşçıer**
 
 GitHub:
 
-https://github.com/vedattascier
-
-Proje:
-
 https://github.com/vedattascier/kali_turkcelestirme
 
-## 📜 Lisans
+---
 
-Bu proje açık kaynak olarak geliştirilmektedir.
+# 📜 Lisans
 
-Lisans koşulları için `LICENSE` dosyasına bakınız.
+MIT License
+
+Bu proje eğitim, kişisel kullanım, CTF ve yetkili güvenlik testleri
+için geliştirilmektedir.
+
+```
+```
